@@ -25,16 +25,40 @@ class AuthManager {
         localStorage.setItem(this.storageKey, JSON.stringify(users));
     }
 
-    login(username, password) {
-        const users = this.getUsers();
-        const user = users.find(u => u.username === username && u.password === password);
-        
-        if (user) {
-            const sessionUser = { username: user.username, role: user.role };
-            localStorage.setItem(this.currentUserKey, JSON.stringify(sessionUser));
-            return { success: true, user: sessionUser };
+    async login(username, password) {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const sessionUser = { 
+                    username: username, 
+                    role: data.role, 
+                    token: data.token,
+                    redirect_url: data.redirect_url
+                };
+                localStorage.setItem(this.currentUserKey, JSON.stringify(sessionUser));
+                return { success: true, user: sessionUser };
+            } else {
+                const errorData = await response.json();
+                return { success: false, message: errorData.detail || '用户名或密码错误' };
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            // 降级使用本地验证（方便没有后端环境时测试）
+            const users = this.getUsers();
+            const user = users.find(u => u.username === username && u.password === password);
+            if (user) {
+                const sessionUser = { username: user.username, role: user.role };
+                localStorage.setItem(this.currentUserKey, JSON.stringify(sessionUser));
+                return { success: true, user: sessionUser };
+            }
+            return { success: false, message: '无法连接到服务器或用户名密码错误' };
         }
-        return { success: false, message: '用户名或密码错误' };
     }
 
     register(username, password, role) {

@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toLoginBtn.addEventListener('click', showLoginTab);
     
     // 登录逻辑
-    document.getElementById('doLoginBtn').addEventListener('click', () => {
+    document.getElementById('doLoginBtn').addEventListener('click', async () => {
         const username = document.getElementById('loginUsername').value.trim();
         const password = document.getElementById('loginPassword').value;
         
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        const result = authManager.login(username, password);
+        const result = await authManager.login(username, password);
         if (result.success) {
             authMessage.innerHTML = '登录成功，跳转中...';
             setTimeout(() => {
