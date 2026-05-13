@@ -14,8 +14,12 @@ backend/
 │   │   └── user.py         # 数据模型定义(包含UserRole等)
 │   ├── services/
 │   │   └── blender_service.py # 与Blender插件的具体通信和调度服务逻辑
-│   ├── main.py             # 整个FastAPI应用的入口与路由注册
+│   ├── database.py         # 数据库连接与配置
+│   └── main.py             # 整个FastAPI应用的入口与路由注册
+├── tools/
+│   └──init_db.py           # 数据库初始化脚本(自动建表与插入测试数据)
 ├── requirements.txt
+├── .gitignore
 └── README.md
 ```
 
@@ -41,7 +45,7 @@ backend/
 
 ## 安装与运行
 
-确保你的环境中已经安装了 Python 3.9+。
+确保你的环境中已经安装了 Python 3.9+ 以及 **MySQL** 数据库。
 
 1. **安装依赖:**
    ```bash
@@ -49,10 +53,18 @@ backend/
    pip install -r requirements.txt
    ```
 
-2. **运行服务:**
+2. **数据库配置与初始化:**
+   - 确保你的 MySQL 服务已启动。
+   - 在 MySQL 中创建一个数据库（并且根据需要在 `.env` 或者`app/database.py` 中修改 `DATABASE_URL` 配合你自己的用户名密码）。
+   - 运行初始化脚本自动生成表并插入测试用户数据：
+   ```bash
+   python init_db.py
+   ```
+
+3. **运行服务:**
    ```bash
    uvicorn app.main:app --reload
    ```
 
-3. **接口文档:**
+4. **接口文档:**
    服务成功启动后在浏览器打开 `http://127.0.0.1:8000/docs` 即可查看 Swagger UI 互动式API文档。
