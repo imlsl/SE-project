@@ -35,12 +35,46 @@ class BlenderBridge {
         return true;
     }
 
-    applyTemplate(templateId) {
+    async applyTemplate(templateId) {
         this.log(`应用模板: ${templateId}`);
-        this.log(`生成城市布局...`);
-        setTimeout(() => {
-            this.log(`模板 ${templateId} 应用完成，场景已更新`);
-        }, 800);
+        this.log(`联系后端生成城市布局...`);
+        try {
+            const response = await fetch('http://127.0.0.1:8000/blender/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    city_name: templateId, 
+                    scale: 1.0, 
+                    style: 'default'
+                })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.log(`后端已接受任务，Task ID: ${data.task_id}`);
+                
+                // 轮询检查任务状态
+                const checkStatus = async () => {
+                    const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        this.log(`任务状态: ${statusData.status}`);
+                        if (statusData.status === 'completed') {
+                            this.log(`模板 ${templateId} 应用完成，场景已更新 (下载链接: ${statusData.download_url})`);
+                        } else {
+                            setTimeout(checkStatus, 1500);
+                        }
+                    }
+                };
+                setTimeout(checkStatus, 1000);
+            } else {
+                this.log(`发生错误: 请求后端失败`);
+            }
+        } catch (e) {
+            this.log(`后端网络错误, 使用降级逻辑...`);
+            setTimeout(() => {
+                this.log(`模板 ${templateId} 降级应用完成，场景已更新`);
+            }, 800);
+        }
         return true;
     }
 
