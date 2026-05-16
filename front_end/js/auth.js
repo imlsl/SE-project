@@ -1,33 +1,13 @@
 // 认证模块 - 用户登录/注册逻辑
 class AuthManager {
     constructor() {
-        this.storageKey = 'smartcity_users';
         this.currentUserKey = 'smartcity_current_user';
-        this.initUsers();
-    }
-
-    initUsers() {
-        if (!localStorage.getItem(this.storageKey)) {
-            const defaultUsers = [
-                { username: 'admin', password: 'admin123', role: 'system_admin' },
-                { username: 'analyst', password: '123456', role: 'industry_analyst' },
-                { username: 'modeler', password: '123456', role: 'scene_modeler' }
-            ];
-            localStorage.setItem(this.storageKey, JSON.stringify(defaultUsers));
-        }
-    }
-
-    getUsers() {
-        return JSON.parse(localStorage.getItem(this.storageKey) || '[]');
-    }
-
-    saveUsers(users) {
-        localStorage.setItem(this.storageKey, JSON.stringify(users));
+        this.baseUrl = 'http://127.0.0.1:8000';
     }
 
     async login(username, password) {
         try {
-            const response = await fetch('http://127.0.0.1:8000/auth/login', {
+            const response = await fetch(`${this.baseUrl}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -38,8 +18,7 @@ class AuthManager {
                 const sessionUser = { 
                     username: username, 
                     role: data.role, 
-                    token: data.token,
-                    redirect_url: data.redirect_url
+                    token: data.token
                 };
                 localStorage.setItem(this.currentUserKey, JSON.stringify(sessionUser));
                 return { success: true, user: sessionUser };
@@ -49,36 +28,29 @@ class AuthManager {
             }
         } catch (error) {
             console.error('Login error:', error);
-            // 降级使用本地验证（方便没有后端环境时测试）
-            const users = this.getUsers();
-            const user = users.find(u => u.username === username && u.password === password);
-            if (user) {
-                const sessionUser = { username: user.username, role: user.role };
-                localStorage.setItem(this.currentUserKey, JSON.stringify(sessionUser));
-                return { success: true, user: sessionUser };
-            }
-            return { success: false, message: '无法连接到服务器或用户名密码错误' };
+            return { success: false, message: '无法连接到服务器，请检查后端服务是否启动' };
         }
     }
 
-    register(username, password, role) {
-        const users = this.getUsers();
-        
-        if (users.find(u => u.username === username)) {
-            return { success: false, message: '用户名已存在' };
+    async register(username, password, role) {
+        try {
+            const response = await fetch(`${this.baseUrl}/auth/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, role })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                return { success: true, message: data.message || '注册成功，请登录' };
+            } else {
+                const errorData = await response.json();
+                return { success: false, message: errorData.detail || '注册失败' };
+            }
+        } catch (error) {
+            console.error('Register error:', error);
+            return { success: false, message: '无法连接到服务器，请检查后端服务是否启动' };
         }
-        
-        if (username.length < 3 || username.length > 20) {
-            return { success: false, message: '用户名长度需为3-20个字符' };
-        }
-        
-        if (password.length < 6) {
-            return { success: false, message: '密码长度至少6位' };
-        }
-        
-        users.push({ username, password, role });
-        this.saveUsers(users);
-        return { success: true, message: '注册成功，请登录' };
     }
 
     getCurrentUser() {
@@ -93,4 +65,6 @@ class AuthManager {
     isLoggedIn() {
         return this.getCurrentUser() !== null;
     }
+
+    // 移除 validateToken 方法，不再使用
 }
