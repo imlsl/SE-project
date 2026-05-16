@@ -1,4 +1,13 @@
 import logging
+import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(current_dir)
+
+if backend_dir not in sys.path:
+    sys.path.append(backend_dir)
+
 from app.database import engine, Base, SessionLocal
 from app.models.user import DBUser, UserRole
 
@@ -21,10 +30,11 @@ def seed_data():
             return
             
         logger.info("Seeding initial mock users...")
+        # 修改：为初始化的 Mock 用户赋予初始昵称
         users = [
-            DBUser(username="admin", password="admin123", role=UserRole.ADMIN),
-            DBUser(username="analyst", password="123456", role=UserRole.ANALYST),
-            DBUser(username="modeler", password="123456", role=UserRole.MODELER),
+            DBUser(username="admin", password="123456", role=UserRole.ADMIN, full_name="系统总管"),
+            DBUser(username="analyst", password="123456", role=UserRole.ANALYST, full_name="核心分析师"),
+            DBUser(username="modeler", password="123456", role=UserRole.MODELER, full_name="顶级建模师"),
         ]
         db.add_all(users)
         db.commit()

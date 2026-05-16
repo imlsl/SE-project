@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, blender
+from app.api import auth, blender, admin
 
 app = FastAPI(title="Smart City Generation System API")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(blender.router)
+app.include_router(admin.router)
 
 @app.get("/")
 def read_root():

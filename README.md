@@ -9,6 +9,7 @@ backend/
 ├── app/
 │   ├── api/
 │   │   ├── auth.py         # 认证接口，处理多角色登录与跳转逻辑
+│   │   ├── admin.py        # 系统管理员接口，提供完整的用户增删改查(CRUD)
 │   │   └── blender.py      # Blender生成插件的核心业务接口
 │   ├── models/
 │   │   └── user.py         # 数据模型定义(包含UserRole等)
@@ -17,7 +18,7 @@ backend/
 │   ├── database.py         # 数据库连接与配置
 │   └── main.py             # 整个FastAPI应用的入口与路由注册
 ├── tools/
-│   └──init_db.py           # 数据库初始化脚本(自动建表与插入测试数据)
+│   └── init_db.py          # 数据库初始化脚本(自动建表与插入测试数据)
 ├── requirements.txt
 ├── .gitignore
 └── README.md
