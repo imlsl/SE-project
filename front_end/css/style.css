@@ -333,16 +333,28 @@ body {
     background: rgba(30, 41, 59, 0.9);
 }
 .setting-btn {
-    background: transparent;
+    background: rgba(56, 189, 248, 0.2);
     border: none;
-    color: white;
-    font-size: 16px;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    color: #38bdf8;
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-    transition: background 0.2s;
-    margin-right: auto;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
+
 .setting-btn:hover {
-    background: rgba(255,255,255,0.1);
+    background: rgba(56, 189, 248, 0.4);
+    transform: translateY(-1px);
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    justify-content: flex-end;
 }
