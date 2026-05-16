@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>智能城市生成系统 | 登录</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="bg-glow bg-glow-left"></div>
+
+<div class="app-container" id="appRoot">
+    <div id="authView">
+        <div class="auth-wrapper">
+            <div class="glass-card auth-card">
+                <div class="hero-icon">
+                    <i class="fas fa-city"></i>
+                </div>
+                <div class="logo">SmartCity Generator</div>
+                <div class="tagline">智能城市生成系统</div>
+                <div id="authTabs" style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+                    <button class="btn-outline" style="flex:1;" id="loginTabBtn">登录</button>
+                    <button class="btn-outline" style="flex:1;" id="registerTabBtn">注册</button>
+                </div>
+                <div id="loginForm">
+                    <div class="input-group">
+                        <label>用户名</label>
+                        <div class="input-with-icon"><i class="fas fa-user"></i><input type="text" id="loginUsername" placeholder="请输入用户名"></div>
+                    </div>
+                    <div class="input-group">
+                        <label>密码</label>
+                        <div class="input-with-icon"><i class="fas fa-lock"></i><input type="password" id="loginPassword" placeholder="密码"></div>
+                    </div>
+                    <button class="btn" id="doLoginBtn">登录系统</button>
+                    <div class="switch-text">没有账号？ <span id="toRegisterBtn">立即注册</span></div>
+                </div>
+                <div id="registerForm" style="display:none;">
+                    <div class="input-group">
+                        <label>用户名</label>
+                        <div class="input-with-icon"><i class="fas fa-user-plus"></i><input type="text" id="regUsername" placeholder="3~20个字符"></div>
+                    </div>
+                    <div class="input-group">
+                        <label>密码</label>
+                        <div class="input-with-icon"><i class="fas fa-key"></i><input type="password" id="regPassword" placeholder="至少6位"></div>
+                    </div>
+                    <div class="input-group">
+                        <label>选择角色</label>
+                        <select id="regRole">
+                            <option value="industry_analyst">行业分析师</option>
+                            <option value="scene_modeler">场景建模师</option>
+                            <option value="system_admin">系统管理员</option>
+                        </select>
+                    </div>
+                    <button class="btn" id="doRegisterBtn">注册新账号</button>
+                    <div class="switch-text">已有账号？ <span id="toLoginBtn">立即登录</span></div>
+                </div>
+                <div id="authMessage" style="margin-top: 1rem; font-size: 0.85rem; color: #f97316;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/common.js"></script>
+<script>
+    const authManager = new AuthManager();
+    
+    // 检查是否已登录（不验证 token，只检查本地存储）
+    function checkLoginStatus() {
+        if (authManager.isLoggedIn()) {
+            const user = authManager.getCurrentUser();
+            console.log('已登录，自动跳转:', user);
+            redirectByRole(user.role);
+        }
+    }
+    checkLoginStatus();
+
+    // DOM 元素
+    const loginTabBtn = document.getElementById('loginTabBtn');
+    const registerTabBtn = document.getElementById('registerTabBtn');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const toRegisterBtn = document.getElementById('toRegisterBtn');
+    const toLoginBtn = document.getElementById('toLoginBtn');
+    const authMessage = document.getElementById('authMessage');
+
+    function showLoginTab() {
+        loginForm.style.display = 'block';
+        registerForm.style.display = 'none';
+        loginTabBtn.classList.add('active');
+        registerTabBtn.classList.remove('active');
+        authMessage.innerHTML = '';
+    }
+
+    function showRegisterTab() {
+        loginForm.style.display = 'none';
+        registerForm.style.display = 'block';
+        registerTabBtn.classList.add('active');
+        loginTabBtn.classList.remove('active');
+        authMessage.innerHTML = '';
+    }
+
+    loginTabBtn.addEventListener('click', showLoginTab);
+    registerTabBtn.addEventListener('click', showRegisterTab);
+    toRegisterBtn.addEventListener('click', showRegisterTab);
+    toLoginBtn.addEventListener('click', showLoginTab);
+
+    // 登录逻辑
+    document.getElementById('doLoginBtn').addEventListener('click', async () => {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!username || !password) {
+            authMessage.innerHTML = '请输入用户名和密码';
+            return;
+        }
+
+        const loginBtn = document.getElementById('doLoginBtn');
+        const originalText = loginBtn.textContent;
+        loginBtn.textContent = '登录中...';
+        loginBtn.disabled = true;
+
+        const result = await authManager.login(username, password);
+        
+        loginBtn.textContent = originalText;
+        loginBtn.disabled = false;
+
+        if (result.success) {
+            authMessage.innerHTML = '登录成功，跳转中...';
+            authMessage.style.color = '#10b981';
+            setTimeout(() => {
+                redirectByRole(result.user.role);
+            }, 500);
+        } else {
+            authMessage.innerHTML = `错误：${result.message}`;
+            authMessage.style.color = '#f97316';
+        }
+    });
+
+    // 注册逻辑
+    document.getElementById('doRegisterBtn').addEventListener('click', async () => {
+        const username = document.getElementById('regUsername').value.trim();
+        const password = document.getElementById('regPassword').value;
+        const role = document.getElementById('regRole').value;
+
+        if (!username || !password) {
+            authMessage.innerHTML = '错误：请填写完整信息';
+            return;
+        }
+
+        const registerBtn = document.getElementById('doRegisterBtn');
+        const originalText = registerBtn.textContent;
+        registerBtn.textContent = '注册中...';
+        registerBtn.disabled = true;
+
+        const result = await authManager.register(username, password, role);
+        
+        registerBtn.textContent = originalText;
+        registerBtn.disabled = false;
+        
+        authMessage.innerHTML = result.success ? '注册成功，请登录' : `错误：${result.message}`;
+        if (result.success) {
+            authMessage.style.color = '#10b981';
+            setTimeout(showLoginTab, 1500);
+            document.getElementById('regUsername').value = '';
+            document.getElementById('regPassword').value = '';
+        } else {
+            authMessage.style.color = '#f97316';
+        }
+    });
+
+    // 回车登录
+    document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') document.getElementById('doLoginBtn').click();
+    });
+</script>
+</body>
+</html>
