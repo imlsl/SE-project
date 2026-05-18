@@ -8,8 +8,6 @@ from app.models.user import (
     AdminCreateUserRequest, AdminUpdateUserRequest
 )
 
-from app.api.auth import get_current_user 
-
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 # --- 权限校验依赖：确保只有系统管理员可以访问 ---
