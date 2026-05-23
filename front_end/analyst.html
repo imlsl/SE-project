@@ -76,7 +76,7 @@
     
     if (checkAuth()) {
         const currentUser = authManager.getCurrentUser();
-        document.getElementById('currentUsernameSpan').textContent = currentUser.username;
+        //document.getElementById('currentUsernameSpan').textContent = currentUser.username;
         
         const analystUI = new IndustryAnalystUI('roleSpecificPanel', currentUser.username);
         analystUI.render();

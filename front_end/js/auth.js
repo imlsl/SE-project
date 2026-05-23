@@ -66,5 +66,4 @@ class AuthManager {
         return this.getCurrentUser() !== null;
     }
 
-    // 移除 validateToken 方法，不再使用
 }

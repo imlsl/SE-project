@@ -4,11 +4,18 @@ class SystemAdminUI extends BaseRoleUI {
         super(containerId, username);
         this.users = [];
         this.systemLogs = [];
+        this.systemUptime = {
+            uptime_days: 0,
+            server_start_time: '',
+            current_time: ''
+        };
         this.systemSettings = {
             renderQuality: '均衡',
             backupInterval: '6小时',
             enableAnalytics: true
         };
+        this.autoRefreshInterval = null;
+        this.uptimeRefreshInterval = null;
     }
 
     async render() {
@@ -16,6 +23,9 @@ class SystemAdminUI extends BaseRoleUI {
         
         this.showLoading(true);
         await this.loadData();
+        await this.loadSystemUptime();
+        
+        const uptimeDisplay = this.formatUptime(this.systemUptime.uptime_days);
         
         this.container.innerHTML = `
             <div class="role-panel">
@@ -29,8 +39,19 @@ class SystemAdminUI extends BaseRoleUI {
                     <div class="stats-grid" id="statsGrid">
                         ${this.createStatCard('注册用户', this.users.length, 'fas fa-users', '#38bdf8')}
                         ${this.createStatCard('在线用户', this.getOnlineCount(), 'fas fa-user-check', '#10b981')}
-                        ${this.createStatCard('系统运行', '24天', 'fas fa-clock', '#a78bfa')}
+                        ${this.createStatCard('系统运行', uptimeDisplay, 'fas fa-clock', '#a78bfa')}
                         ${this.createStatCard('API调用', '12.4k', 'fas fa-chart-line', '#f59e0b')}
+                    </div>
+                    
+                    <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; font-size: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                            <span style="color: #94a3b8;">服务器启动时间：</span>
+                            <span style="color: #e2e8f0;">${this.systemUptime.server_start_time || '加载中...'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="color: #94a3b8;">当前系统时间：</span>
+                            <span style="color: #e2e8f0;" id="currentTime">${this.systemUptime.current_time || '加载中...'}</span>
+                        </div>
                     </div>
                 </div>
 
@@ -39,15 +60,27 @@ class SystemAdminUI extends BaseRoleUI {
                         <i class="fas fa-user-cog"></i> 用户管理
                         <button class="small-btn" id="addUserBtn" style="margin-left: auto;"><i class="fas fa-plus"></i> 添加用户</button>
                     </div>
-                    <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse;">
+                    
+                    <!-- 表格信息栏 -->
+                    <div class="table-info">
+                        <span>
+                            <i class="fas fa-users"></i> 共 <strong id="userCount">${this.users.length}</strong> 位用户
+                        </span>
+                        <span style="font-size: 0.75rem;">
+                            <i class="fas fa-arrow-up"></i> 上下滑动查看更多
+                        </span>
+                    </div>
+                    
+                    <!-- 固定高度的表格容器 -->
+                    <div class="user-table-container">
+                        <table class="user-table">
                             <thead>
-                                <tr style="border-bottom: 1px solid #334155;">
-                                    <th style="text-align: left; padding: 0.5rem;">用户名</th>
-                                    <th style="text-align: left; padding: 0.5rem;">角色</th>
-                                    <th style="text-align: left; padding: 0.5rem;">状态</th>
-                                    <th style="text-align: left; padding: 0.5rem;">最后登录</th>
-                                    <th style="text-align: left; padding: 0.5rem;">操作</th>
+                                <tr>
+                                    <th style="min-width: 120px;">用户名</th>
+                                    <th style="min-width: 120px;">角色</th>
+                                    <th style="min-width: 80px;">状态</th>
+                                    <th style="min-width: 160px;">最后登录</th>
+                                    <th style="min-width: 120px;">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="userTableBody">
@@ -63,7 +96,7 @@ class SystemAdminUI extends BaseRoleUI {
                         <button class="small-btn outline" id="clearLogsBtn" style="margin-left: auto;">清空日志</button>
                     </div>
                     <div id="logContainer" style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 200px; overflow-y: auto;">
-                        ${this.systemLogs.map(log => `<div style="padding: 0.25rem 0; border-bottom: 1px solid #1e293b;">> ${log}</div>`).join('')}
+                        ${this.renderLogs()}
                     </div>
                 </div>
 
@@ -102,31 +135,118 @@ class SystemAdminUI extends BaseRoleUI {
         `;
         
         this.bindEvents();
+        this.startUptimeRefresh();
         this.showLoading(false);
     }
 
     async loadData() {
-        // 模拟从后端获取用户数据
-        this.users = [
-            { username: 'analyst1', role: 'industry_analyst', roleName: '行业分析师', status: 'active', lastLogin: '2024-01-15 09:30' },
-            { username: 'modeler1', role: 'scene_modeler', roleName: '场景建模师', status: 'active', lastLogin: '2024-01-14 14:20' },
-            { username: 'admin', role: 'system_admin', roleName: '系统管理员', status: 'active', lastLogin: '2024-01-15 08:00' },
-            { username: 'analyst2', role: 'industry_analyst', roleName: '行业分析师', status: 'inactive', lastLogin: '2024-01-10 11:15' }
-        ];
-        
-        // 模拟系统日志
+        await this.loadUsers();
+        await this.loadSystemLogs();
+    }
+
+    async loadUsers() {
+        try {
+            const response = await this.apiRequest('/admin/users', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+            
+            if (response) {
+                this.users = response;
+                this.updateStatsCard();
+                this.updateUserCount();
+            }
+        } catch (error) {
+            console.error('加载用户列表失败:', error);
+            this.showMessage('加载用户列表失败: ' + error.message, 'error');
+        }
+    }
+
+    async loadSystemUptime() {
+        try {
+            const response = await this.apiRequest('/admin/users/system/uptime', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+            
+            if (response) {
+                this.systemUptime = response;
+                this.updateStatsCard();
+                
+                // 更新时间详情
+                const startTimeSpan = document.querySelector('.glass-card:first-child div:last-child span:first-child + span');
+                if (startTimeSpan) {
+                    startTimeSpan.textContent = response.server_start_time;
+                }
+                
+                const currentTimeSpan = document.getElementById('currentTime');
+                if (currentTimeSpan) {
+                    currentTimeSpan.textContent = response.current_time;
+                }
+            }
+        } catch (error) {
+            console.error('加载系统运行时间失败:', error);
+        }
+    }
+
+    async loadSystemLogs() {
+        // 模拟系统日志，可以后续对接真实API
         this.systemLogs = [
-            '系统启动 - 2024-01-15 08:00:00',
-            '用户 analyst1 登录 - 2024-01-15 09:23:45',
-            '场景备份完成 - 2024-01-15 10:00:00',
-            'API调用次数: 2,345次 - 2024-01-15 12:00:00',
-            '用户 modeler1 创建新场景 - 2024-01-15 13:20:00',
-            '系统健康检查通过 - 2024-01-15 14:00:00'
+            `系统启动 - ${new Date().toLocaleString()}`,
+            `管理员 ${this.username} 登录 - ${new Date().toLocaleString()}`,
+            '用户管理模块初始化完成',
+            '等待操作...'
         ];
+    }
+
+    renderLogs() {
+        if (this.systemLogs.length === 0) {
+            return '<div style="text-align: center; padding: 2rem; color: #64748b;">暂无日志记录</div>';
+        }
+        
+        return this.systemLogs.map(log => `
+            <div style="padding: 0.25rem 0; border-bottom: 1px solid #1e293b;">
+                > ${log}
+            </div>
+        `).join('');
+    }
+
+    formatUptime(days) {
+        if (days === 0) {
+            return '不足1天';
+        } else if (days === 1) {
+            return '1天';
+        } else {
+            return `${days}天`;
+        }
     }
 
     getOnlineCount() {
         return this.users.filter(u => u.status === 'active').length;
+    }
+
+    updateStatsCard() {
+        const statsGrid = document.getElementById('statsGrid');
+        if (statsGrid) {
+            const uptimeDisplay = this.formatUptime(this.systemUptime.uptime_days);
+            statsGrid.innerHTML = `
+                ${this.createStatCard('注册用户', this.users.length, 'fas fa-users', '#38bdf8')}
+                ${this.createStatCard('在线用户', this.getOnlineCount(), 'fas fa-user-check', '#10b981')}
+                ${this.createStatCard('系统运行', uptimeDisplay, 'fas fa-clock', '#a78bfa')}
+                ${this.createStatCard('API调用', '12.4k', 'fas fa-chart-line', '#f59e0b')}
+            `;
+        }
+    }
+
+    updateUserCount() {
+        const userCountSpan = document.getElementById('userCount');
+        if (userCountSpan) {
+            userCountSpan.textContent = this.users.length;
+        }
     }
 
     renderUserRows() {
@@ -136,16 +256,26 @@ class SystemAdminUI extends BaseRoleUI {
             'system_admin': '系统管理员'
         };
         
+        if (this.users.length === 0) {
+            return `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 2rem; color: #94a3b8;">
+                        暂无用户数据
+                    </td>
+                </tr>
+            `;
+        }
+        
         return this.users.map(user => `
-            <tr style="border-bottom: 1px solid #1e293b;">
+            <tr>
                 <td style="padding: 0.75rem 0.5rem;">${user.username}</td>
                 <td style="padding: 0.75rem 0.5rem;">${roleNames[user.role] || user.role}</td>
                 <td style="padding: 0.75rem 0.5rem;">
-                    <span style="background: ${user.status === 'active' ? '#10b98120' : '#ef444420'}; padding: 0.25rem 0.5rem; border-radius: 0.5rem; font-size: 0.7rem; color: ${user.status === 'active' ? '#10b981' : '#ef4444'}">
+                    <span class="status-badge ${user.status === 'active' ? 'status-active' : 'status-inactive'}">
                         ${user.status === 'active' ? '活跃' : '禁用'}
                     </span>
                 </td>
-                <td style="padding: 0.75rem 0.5rem;">${user.lastLogin}</td>
+                <td style="padding: 0.75rem 0.5rem;">${user.last_login || '从未登录'}</td>
                 <td style="padding: 0.75rem 0.5rem;">
                     <button class="small-btn outline user-edit" data-user="${user.username}" style="margin-right: 0.25rem;">编辑</button>
                     <button class="small-btn outline user-delete" data-user="${user.username}" style="color: #ef4444;">删除</button>
@@ -154,14 +284,27 @@ class SystemAdminUI extends BaseRoleUI {
         `).join('');
     }
 
+    startUptimeRefresh() {
+        if (this.uptimeRefreshInterval) {
+            clearInterval(this.uptimeRefreshInterval);
+        }
+        
+        this.uptimeRefreshInterval = setInterval(() => {
+            const currentTimeSpan = document.getElementById('currentTime');
+            if (currentTimeSpan) {
+                const now = new Date();
+                const formattedTime = now.toISOString().replace('T', ' ').substring(0, 19);
+                currentTimeSpan.textContent = formattedTime;
+            }
+        }, 1000);
+    }
+
     bindEvents() {
-        // 添加用户
         const addUserBtn = document.getElementById('addUserBtn');
         if (addUserBtn) {
             addUserBtn.addEventListener('click', () => this.showAddUserDialog());
         }
         
-        // 用户编辑/删除事件
         document.querySelectorAll('.user-edit').forEach(btn => {
             btn.addEventListener('click', () => {
                 const username = btn.dataset.user;
@@ -176,20 +319,18 @@ class SystemAdminUI extends BaseRoleUI {
             });
         });
         
-        // 清空日志
         const clearLogsBtn = document.getElementById('clearLogsBtn');
         if (clearLogsBtn) {
             clearLogsBtn.addEventListener('click', () => {
                 this.systemLogs = [];
                 const logContainer = document.getElementById('logContainer');
                 if (logContainer) {
-                    logContainer.innerHTML = '<div>> 日志已清空</div>';
+                    logContainer.innerHTML = '<div style="text-align: center; padding: 2rem; color: #64748b;">日志已清空</div>';
                 }
                 this.showMessage('系统日志已清空', 'info');
             });
         }
         
-        // 保存配置
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         if (saveConfigBtn) {
             saveConfigBtn.addEventListener('click', () => {
@@ -200,7 +341,6 @@ class SystemAdminUI extends BaseRoleUI {
                 this.systemSettings = { renderQuality, backupInterval, enableAnalytics };
                 this.showMessage('配置已保存', 'info');
                 
-                // 添加日志
                 this.systemLogs.unshift(`系统配置已更新 - ${new Date().toLocaleString()}`);
                 const logContainer = document.getElementById('logContainer');
                 if (logContainer && this.systemLogs.length > 0) {
@@ -218,24 +358,24 @@ class SystemAdminUI extends BaseRoleUI {
         `;
         
         const dialogHtml = `
-            <div id="userDialog" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 10000;">
-                <div style="background: #1e293b; border-radius: 1rem; padding: 1.5rem; width: 400px;">
-                    <h3 style="margin-bottom: 1rem;">添加用户</h3>
+            <div id="userDialog" class="modal">
+                <div class="modal-content">
+                    <h3>添加用户</h3>
                     <div class="input-group">
                         <label>用户名</label>
-                        <input type="text" id="newUsername" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        <input type="text" id="newUsername" placeholder="请输入用户名">
                     </div>
                     <div class="input-group">
                         <label>密码</label>
-                        <input type="password" id="newPassword" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        <input type="password" id="newPassword" placeholder="请输入密码（至少6位）">
                     </div>
                     <div class="input-group">
                         <label>角色</label>
-                        <select id="newRole" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        <select id="newRole">
                             ${roleOptions}
                         </select>
                     </div>
-                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                    <div class="modal-buttons">
                         <button class="btn" id="confirmAddUser">确认添加</button>
                         <button class="btn-outline" id="cancelAddUser">取消</button>
                     </div>
@@ -245,7 +385,7 @@ class SystemAdminUI extends BaseRoleUI {
         
         document.body.insertAdjacentHTML('beforeend', dialogHtml);
         
-        document.getElementById('confirmAddUser').addEventListener('click', () => {
+        document.getElementById('confirmAddUser').addEventListener('click', async () => {
             const username = document.getElementById('newUsername').value.trim();
             const password = document.getElementById('newPassword').value;
             const role = document.getElementById('newRole').value;
@@ -255,38 +395,49 @@ class SystemAdminUI extends BaseRoleUI {
                 return;
             }
             
-            if (this.users.find(u => u.username === username)) {
-                this.showMessage('用户名已存在', 'error');
+            if (password.length < 6) {
+                this.showMessage('密码长度至少6位', 'error');
                 return;
             }
             
-            const roleNames = {
-                'industry_analyst': '行业分析师',
-                'scene_modeler': '场景建模师',
-                'system_admin': '系统管理员'
-            };
-            
-            this.users.push({
-                username,
-                role,
-                roleName: roleNames[role],
-                status: 'active',
-                lastLogin: '从未登录'
-            });
-            
-            const userTableBody = document.getElementById('userTableBody');
-            if (userTableBody) {
-                userTableBody.innerHTML = this.renderUserRows();
-            }
-            
-            this.showMessage(`用户 ${username} 添加成功`, 'info');
+            await this.createUser(username, password, role);
             document.getElementById('userDialog').remove();
-            this.bindEvents();
         });
         
         document.getElementById('cancelAddUser').addEventListener('click', () => {
             document.getElementById('userDialog').remove();
         });
+    }
+
+    async createUser(username, password, role) {
+        this.showLoading(true);
+        try {
+            const response = await this.apiRequest('/admin/users', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    role: role
+                })
+            });
+            
+            if (response && !response.detail) {
+                this.users.push(response);
+                this.refreshUserTable();
+                this.showMessage(`用户 ${username} 添加成功`, 'success');
+            } else if (response && response.detail) {
+                this.showMessage(response.detail, 'error');
+            }
+        } catch (error) {
+            console.error('创建用户失败:', error);
+            this.showMessage('创建用户失败: ' + error.message, 'error');
+        } finally {
+            this.showLoading(false);
+        }
     }
 
     showEditUserDialog(username) {
@@ -300,27 +451,24 @@ class SystemAdminUI extends BaseRoleUI {
         `;
         
         const dialogHtml = `
-            <div id="userDialog" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 10000;">
-                <div style="background: #1e293b; border-radius: 1rem; padding: 1.5rem; width: 400px;">
-                    <h3 style="margin-bottom: 1rem;">编辑用户: ${username}</h3>
+            <div id="userDialog" class="modal">
+                <div class="modal-content">
+                    <h3>编辑用户: ${username}</h3>
+                    <div class="input-group">
+                        <label>新用户名</label>
+                        <input type="text" id="editUsername" value="${user.username}">
+                    </div>
                     <div class="input-group">
                         <label>新密码（留空表示不修改）</label>
-                        <input type="password" id="editPassword" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        <input type="password" id="editPassword" placeholder="留空则不修改密码">
                     </div>
                     <div class="input-group">
                         <label>角色</label>
-                        <select id="editRole" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        <select id="editRole">
                             ${roleOptions}
                         </select>
                     </div>
-                    <div class="input-group">
-                        <label>状态</label>
-                        <select id="editStatus" style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            <option value="active" ${user.status === 'active' ? 'selected' : ''}>活跃</option>
-                            <option value="inactive" ${user.status === 'inactive' ? 'selected' : ''}>禁用</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                    <div class="modal-buttons">
                         <button class="btn" id="confirmEditUser">保存修改</button>
                         <button class="btn-outline" id="cancelEditUser">取消</button>
                     </div>
@@ -330,26 +478,18 @@ class SystemAdminUI extends BaseRoleUI {
         
         document.body.insertAdjacentHTML('beforeend', dialogHtml);
         
-        document.getElementById('confirmEditUser').addEventListener('click', () => {
+        document.getElementById('confirmEditUser').addEventListener('click', async () => {
+            const newUsername = document.getElementById('editUsername').value.trim();
             const newPassword = document.getElementById('editPassword').value;
             const newRole = document.getElementById('editRole').value;
-            const newStatus = document.getElementById('editStatus').value;
             
-            user.role = newRole;
-            user.status = newStatus;
-            
-            if (newPassword) {
-                user.password = newPassword;
+            if (!newUsername) {
+                this.showMessage('用户名不能为空', 'error');
+                return;
             }
             
-            const userTableBody = document.getElementById('userTableBody');
-            if (userTableBody) {
-                userTableBody.innerHTML = this.renderUserRows();
-            }
-            
-            this.showMessage(`用户 ${username} 信息已更新`, 'info');
+            await this.updateUser(username, newUsername, newPassword, newRole);
             document.getElementById('userDialog').remove();
-            this.bindEvents();
         });
         
         document.getElementById('cancelEditUser').addEventListener('click', () => {
@@ -357,20 +497,95 @@ class SystemAdminUI extends BaseRoleUI {
         });
     }
 
-    deleteUser(username) {
+    async updateUser(oldUsername, newUsername, password, role) {
+        this.showLoading(true);
+        try {
+            const updateData = {};
+            if (newUsername !== oldUsername) updateData.username = newUsername;
+            if (password) updateData.password = password;
+            if (role) updateData.role = role;
+            
+            if (Object.keys(updateData).length === 0) {
+                this.showMessage('没有要更新的内容', 'info');
+                return;
+            }
+            
+            const response = await this.apiRequest(`/admin/users/${oldUsername}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            if (response && !response.detail) {
+                const index = this.users.findIndex(u => u.username === oldUsername);
+                if (index !== -1) {
+                    this.users[index] = response;
+                }
+                this.refreshUserTable();
+                this.showMessage(`用户 ${oldUsername} 信息已更新`, 'success');
+            } else if (response && response.detail) {
+                this.showMessage(response.detail, 'error');
+            }
+        } catch (error) {
+            console.error('更新用户失败:', error);
+            this.showMessage('更新用户失败: ' + error.message, 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    async deleteUser(username) {
         if (username === this.username) {
             this.showMessage('不能删除当前登录的管理员账号', 'error');
             return;
         }
         
         if (confirm(`确定要删除用户 "${username}" 吗？此操作不可恢复。`)) {
-            this.users = this.users.filter(u => u.username !== username);
-            const userTableBody = document.getElementById('userTableBody');
-            if (userTableBody) {
-                userTableBody.innerHTML = this.renderUserRows();
+            this.showLoading(true);
+            try {
+                const response = await this.apiRequest(`/admin/users/${username}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-Username': this.username
+                    }
+                });
+                
+                if (response && !response.detail) {
+                    this.users = this.users.filter(u => u.username !== username);
+                    this.refreshUserTable();
+                    this.showMessage(`用户 ${username} 已删除`, 'success');
+                } else if (response && response.detail) {
+                    this.showMessage(response.detail, 'error');
+                }
+            } catch (error) {
+                console.error('删除用户失败:', error);
+                this.showMessage('删除用户失败: ' + error.message, 'error');
+            } finally {
+                this.showLoading(false);
             }
-            this.showMessage(`用户 ${username} 已删除`, 'info');
-            this.bindEvents();
         }
+    }
+
+    refreshUserTable() {
+        const userTableBody = document.getElementById('userTableBody');
+        if (userTableBody) {
+            userTableBody.innerHTML = this.renderUserRows();
+        }
+        this.updateStatsCard();
+        this.updateUserCount();
+        this.bindEvents();
+    }
+
+    destroy() {
+        if (this.uptimeRefreshInterval) {
+            clearInterval(this.uptimeRefreshInterval);
+        }
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
+        super.destroy();
     }
 }

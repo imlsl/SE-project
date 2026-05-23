@@ -51,7 +51,6 @@
                         <select id="regRole">
                             <option value="industry_analyst">行业分析师</option>
                             <option value="scene_modeler">场景建模师</option>
-                            <option value="system_admin">系统管理员</option>
                         </select>
                     </div>
                     <button class="btn" id="doRegisterBtn">注册新账号</button>
@@ -68,16 +67,8 @@
 <script>
     const authManager = new AuthManager();
     
-    // 检查是否已登录（不验证 token，只检查本地存储）
-    function checkLoginStatus() {
-        if (authManager.isLoggedIn()) {
-            const user = authManager.getCurrentUser();
-            console.log('已登录，自动跳转:', user);
-            redirectByRole(user.role);
-        }
-    }
-    checkLoginStatus();
-
+    // 已移除自动登录功能 - 用户必须手动点击登录按钮才能登录
+    
     // DOM 元素
     const loginTabBtn = document.getElementById('loginTabBtn');
     const registerTabBtn = document.getElementById('registerTabBtn');
@@ -151,6 +142,11 @@
             return;
         }
 
+        if (password.length < 6) {
+            authMessage.innerHTML = '错误：密码长度至少6位';
+            return;
+        }
+
         const registerBtn = document.getElementById('doRegisterBtn');
         const originalText = registerBtn.textContent;
         registerBtn.textContent = '注册中...';
@@ -175,6 +171,11 @@
     // 回车登录
     document.getElementById('loginPassword').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') document.getElementById('doLoginBtn').click();
+    });
+    
+    // 回车注册（在注册表单的密码框中按回车）
+    document.getElementById('regPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') document.getElementById('doRegisterBtn').click();
     });
 </script>
 </body>
