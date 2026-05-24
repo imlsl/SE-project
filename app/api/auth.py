@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -6,6 +7,7 @@ from app.models.user import (
     UserProfileResponse, UserProfileUpdateRequest, ChangePasswordRequest
 )
 from app.database import get_db
+from app.admin_logger import admin_logger, log_file
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -55,6 +57,12 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         # FastAPI 会自动将其转为 {"detail": "..."}，完美契合前端的 errorData.detail 逻辑
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     
+    # === 在此处自动更新最后登录时间 ===
+    user.last_login = datetime.now()
+    db.commit()
+
+    admin_logger.info(f"{user.role} '{user.username}' 登录了系统")
+
     user_role = user.role
     redirect_url = ROLE_REDIRECT_URLS[user_role]
     

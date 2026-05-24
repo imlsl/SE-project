@@ -19,6 +19,7 @@ backend/
 │   ├── services/
 │   │   └── blender_service.py # 与Blender插件的具体通信和调度服务逻辑
 │   ├── database.py         # 数据库连接与配置
+│   ├── admin_logger.py     # 生成系统管理员日志
 │   └── main.py             # 整个FastAPI应用的入口与路由注册
 ├── tools/
 │   └── init_db.py          # 数据库初始化脚本(自动建表与插入测试数据)
@@ -38,7 +39,15 @@ backend/
 * **行业分析师 (Industry Analyst)**
 * **场景建模师 (Scene Modeler)**
 
-### 2. 行业分析师模块 (Industry Analyst Dashboard)
+### 2. 系统管理员模块 (System Admin Dashboard)
+
+在 `app/api/admin.py` 及 `app/admin_logger.py` 中实现了面向系统管理员的核心服务：
+
+* **全局用户管理**：提供创建、修改、删除和查询用户的权限 (基于角色的高权限校验)。
+* **日志与审计**：独立的 `admin_operations.log` 文件记录管理行为，支持定期轮转（每天备份）并配置自动清理策略，避免日志膨胀。`/admin/users/system/logs` 接口，以便在前端实时提取查看或清楚日志条目。
+* **系统运行监控**：提供接口 `/admin/users/system/uptime` 可实时获取系统启动时长和当前服务器时间，供前端仪表盘同步展示。
+
+### 3. 行业分析师模块 (Industry Analyst Dashboard)
 
 在 `app/api/analyst.py` 中实现了面向行业分析师的数据服务：
 
@@ -46,14 +55,14 @@ backend/
 * **行业分析**：支持交通运输、能源管理、环境保护等细分领域的健康度打分与趋势分析。
 * **报告系统**：提供活动日志追踪，并支持触发生成季度/月度的行业分析报告。
 
-### 3. 场景建模师模块 (Scene Modeler Workspace)
+### 4. 场景建模师模块 (Scene Modeler Workspace)
 
 在 `app/api/modeler.py` 中实现了面向建模师的场景与项目管理服务：
 
 * **场景项目管理**：支持用户个人的 3D 场景项目创建、查询和删除（CRUD），状态区分草稿与已发布。
 * **多模态大模型指令集成 (LLM Command)**：新增自然语言转控制指令接口，接收建模师的日常语义（如“在十字路口添加智能路灯”），转化为 Blender 插件所需的标准化参数。
 
-### 4. 插件系统入口跳转控制 (前端登录后)
+### 5. 插件系统入口跳转控制 (前端登录后)
 
 后端 `/auth/login` 接口 (`app/api/auth.py`) 根据身份验证结果（即不同的 `UserRole`），自动返回给前端对应的 `redirect_url`。例如：
 
@@ -62,7 +71,7 @@ backend/
 * 建模师跳转至城市场景生成系统 `/plugin/blender-generator`
 通过此设计完成鉴权与插件入口的动态路由机制。
 
-### 5. 连接 Blender 城市场景生成插件系统
+### 6. 连接 Blender 城市场景生成插件系统
 
 在 `app/services/blender_service.py` 和 `app/api/blender.py` 中实现了连接 Blender 系统的核心接口：
 

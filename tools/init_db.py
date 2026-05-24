@@ -8,6 +8,7 @@ backend_dir = os.path.dirname(current_dir)
 if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 
+from datetime import datetime
 from app.database import engine, Base, SessionLocal
 from app.models.user import DBUser, UserRole
 from app.models.scene import DBScene
@@ -31,10 +32,11 @@ def seed_data():
             return
             
         logger.info("Seeding initial mock users...")
-        # 为初始化的 Mock 用户赋予初始昵称
-        admin_user = DBUser(username="admin", password="123456", role=UserRole.ADMIN, full_name="系统总管")
-        analyst_user = DBUser(username="analyst", password="123456", role=UserRole.ANALYST, full_name="核心分析师")
-        modeler_user = DBUser(username="modeler", password="123456", role=UserRole.MODELER, full_name="顶级建模师")
+        # 为初始化的 Mock 用户赋予初始昵称、部分详情以及默认登录时间
+        now = datetime.now()
+        admin_user = DBUser(username="admin", password="123456", role=UserRole.ADMIN, full_name="系统总管", last_login=now)
+        analyst_user = DBUser(username="analyst", password="123456", role=UserRole.ANALYST, full_name="核心分析师", last_login=now)
+        modeler_user = DBUser(username="modeler", password="123456", role=UserRole.MODELER, full_name="顶级建模师", last_login=now)
         
         db.add_all([admin_user, analyst_user, modeler_user])
         db.commit() # 先提交，为了获取自动生成的 user.id

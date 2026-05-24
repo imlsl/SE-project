@@ -1,8 +1,25 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, blender, admin, analyst, modeler
+from app.admin_logger import admin_logger
 
-app = FastAPI(title="Smart City Generation System API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ==========================================
+    # 系统启动操作 (Server Startup Ops)
+    # ==========================================
+    admin_logger.info("============== 系统已启动 (System Server Started) ==============")
+    
+    yield
+    
+    # ==========================================
+    # 系统关闭操作 (Server Shutdown Ops)
+    # ==========================================
+    admin_logger.info("============== 系统已关闭 (System Server Shutdown) ==============")
+
+
+app = FastAPI(title="Smart City Generation System API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

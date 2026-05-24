@@ -1,7 +1,8 @@
 from enum import Enum
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Enum as SQLEnum, DateTime
+from datetime import datetime
 from app.database import Base
 
 class UserRole(str, Enum):
@@ -22,6 +23,7 @@ class DBUser(Base):
     full_name = Column(String(50), nullable=True)
     email = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
+    last_login = Column(DateTime, nullable=True)
 
 # --- Pydantic 模型 (用于API数据验证) ---
 class User(BaseModel):
@@ -49,6 +51,7 @@ class UserProfileResponse(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    last_login: Optional[datetime] = None
 
     class Config:
         from_attributes = True 
