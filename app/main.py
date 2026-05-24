@@ -9,14 +9,14 @@ async def lifespan(app: FastAPI):
     # ==========================================
     # 系统启动操作 (Server Startup Ops)
     # ==========================================
-    admin_logger.info("============== 系统已启动 (System Server Started) ==============")
+    admin_logger.info("============== 系统已启动  ==============")
     
     yield
     
     # ==========================================
     # 系统关闭操作 (Server Shutdown Ops)
     # ==========================================
-    admin_logger.info("============== 系统已关闭 (System Server Shutdown) ==============")
+    admin_logger.info("============== 系统已关闭  ==============")
 
 
 app = FastAPI(title="Smart City Generation System API", lifespan=lifespan)

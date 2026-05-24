@@ -10,6 +10,12 @@ class UserRole(str, Enum):
     ANALYST = "industry_analyst"
     MODELER = "scene_modeler"
 
+ROLE_CN_MAP = {
+    UserRole.ADMIN: "系统管理员",
+    UserRole.ANALYST: "行业分析师",
+    UserRole.MODELER: "场景建模师"
+}
+
 # --- SQLAlchemy 模型 (用于数据库映射) ---
 class DBUser(Base):
     __tablename__ = "users"
@@ -79,3 +85,9 @@ class AdminUpdateUserRequest(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
 
+class SystemUptimeResponse(BaseModel):
+    server_start_time: str
+    uptime_days: int
+    current_time: str
+    file_path: str
+    file_exists: bool

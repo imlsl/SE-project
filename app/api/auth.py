@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.models.user import (
-    LoginRequest, LoginResponse, UserRole, DBUser, RegisterRequest,
+    LoginRequest, LoginResponse, UserRole, ROLE_CN_MAP, DBUser, RegisterRequest,
     UserProfileResponse, UserProfileUpdateRequest, ChangePasswordRequest
 )
 from app.database import get_db
@@ -61,7 +61,8 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user.last_login = datetime.now()
     db.commit()
 
-    admin_logger.info(f"{user.role} '{user.username}' 登录了系统")
+    role_cn = ROLE_CN_MAP.get(user.role, user.role.value)
+    admin_logger.info(f"{role_cn} '{user.username}' 登录了系统")
 
     user_role = user.role
     redirect_url = ROLE_REDIRECT_URLS[user_role]

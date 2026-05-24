@@ -20,5 +20,6 @@ env/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and json
 admin_operations.log
+system_uptime.json
