@@ -78,6 +78,27 @@ class BlenderBridge {
         return true;
     }
 
+    async applyLayout(layoutData) {
+        this.log(`应用布局: ${JSON.stringify(layoutData)}`);
+        this.log('生成道路/节点并同步到场景...');
+        // 模拟后端处理
+        setTimeout(() => {
+            this.log('布局应用完成，场景道路与节点已更新');
+        }, 800);
+        return true;
+    }
+
+    async processSketch(fileName) {
+        this.log(`处理草图文件: ${fileName}`);
+        this.log('尝试从草图中提取点集与道路线...');
+        // 模拟提取结果
+        setTimeout(() => {
+            const points = [{x:10,y:20},{x:50,y:80},{x:120,y:60}];
+            this.log(`草图提取完成: 点集(${points.length})，已应用到布局`);
+        }, 1000);
+        return true;
+    }
+
     processLLMCommand(command) {
         this.log(`LLM指令: "${command}"`);
         this.log(`解析自然语言...`);

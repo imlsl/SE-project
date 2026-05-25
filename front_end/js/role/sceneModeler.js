@@ -60,14 +60,38 @@ class SceneModelerUI extends BaseRoleUI {
                     </div>
                     <div id="blenderSimulatePanel" style="display: none;">
                         <div style="margin-bottom: 1rem;">
-                            <div class="function-grid">
-                                <button class="small-btn outline" id="simulateAddRoadTex"><i class="fas fa-road"></i> 道路纹理</button>
-                                <button class="small-btn outline" id="simulateAdd3DLamp"><i class="fas fa-lightbulb"></i> 3D路灯</button>
-                                <button class="small-btn outline" id="simulateTemplate0"><i class="fas fa-city"></i> 城市模板</button>
-                                <button class="small-btn outline" id="simulateLLMCommand"><i class="fas fa-microphone-alt"></i> 自然语言指令</button>
+                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                                <div style="flex:1; min-width:220px;">
+                                    <label style="font-size:0.85rem; color:#94a3b8;">模板ID</label>
+                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                                        <input id="templateInput" placeholder="例如: 模板0" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
+                                        <button class="small-btn outline" id="applyTemplateBtn">应用模板</button>
+                                    </div>
+                                </div>
+
+                                <div style="flex:1; min-width:220px;">
+                                    <label style="font-size:0.85rem; color:#94a3b8;">布局输入 (点集/连线)</label>
+                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                                        <textarea id="layoutInput" placeholder="格式: x1,y1;x2,y2;..." style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0; height:64px;"></textarea>
+                                    </div>
+                                    <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+                                        <button class="small-btn outline" id="applyLayoutBtn">应用布局</button>
+                                        <input type="file" id="sketchUpload" accept="image/*" style="display:inline-block;" />
+                                        <button class="small-btn outline" id="processSketchBtn">处理草图</button>
+                                    </div>
+                                </div>
+
+                                <div style="flex:1; min-width:220px;">
+                                    <label style="font-size:0.85rem; color:#94a3b8;">自然语言指令</label>
+                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                                        <input id="llmInput" placeholder="在十字路口添加路灯" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
+                                        <button class="small-btn outline" id="sendLLMBtn">发送</button>
+                                    </div>
+                                </div>
                             </div>
+
                             <div style="margin-top: 1rem;">
-                                <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 150px; overflow-y: auto;" id="simulateOutput">
+                                <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 180px; overflow-y: auto;" id="simulateOutput">
                                     <div style="color: #a78bfa;">[系统] Blender插件已就绪</div>
                                 </div>
                             </div>
@@ -246,6 +270,53 @@ class SceneModelerUI extends BaseRoleUI {
         // 初始化Blender桥接输出
         if (this.blenderBridge && !this.blenderBridge.outputElement) {
             this.blenderBridge.init('simulateOutput');
+        }
+
+        // 新增：模板/布局/草图/LLM 控件绑定
+        const applyTemplateBtn = document.getElementById('applyTemplateBtn');
+        const templateInput = document.getElementById('templateInput');
+        const applyLayoutBtn = document.getElementById('applyLayoutBtn');
+        const layoutInput = document.getElementById('layoutInput');
+        const sketchUpload = document.getElementById('sketchUpload');
+        const processSketchBtn = document.getElementById('processSketchBtn');
+        const llmInput = document.getElementById('llmInput');
+        const sendLLMBtn = document.getElementById('sendLLMBtn');
+
+        if (applyTemplateBtn && this.blenderBridge) {
+            applyTemplateBtn.addEventListener('click', () => {
+                const tpl = templateInput ? templateInput.value.trim() : '城市基础模板_v0';
+                if (!tpl) return this.showMessage('请输入模板ID', 'error');
+                this.blenderBridge.applyTemplate(tpl);
+            });
+        }
+
+        if (applyLayoutBtn && this.blenderBridge) {
+            applyLayoutBtn.addEventListener('click', () => {
+                const raw = layoutInput ? layoutInput.value.trim() : '';
+                if (!raw) return this.showMessage('请填写布局点集', 'error');
+                // 简单解析格式 x1,y1;x2,y2;...
+                const points = raw.split(';').map(p => {
+                    const [x,y] = p.split(',').map(s => parseFloat(s));
+                    return { x: isNaN(x)?0:x, y: isNaN(y)?0:y };
+                }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
+                this.blenderBridge.applyLayout({ points });
+            });
+        }
+
+        if (processSketchBtn && sketchUpload && this.blenderBridge) {
+            processSketchBtn.addEventListener('click', () => {
+                const file = sketchUpload.files && sketchUpload.files[0];
+                if (!file) return this.showMessage('请先选择草图文件', 'error');
+                this.blenderBridge.processSketch(file.name);
+            });
+        }
+
+        if (sendLLMBtn && llmInput && this.blenderBridge) {
+            sendLLMBtn.addEventListener('click', () => {
+                const cmd = llmInput.value.trim();
+                if (!cmd) return this.showMessage('请输入指令文本', 'error');
+                this.blenderBridge.processLLMCommand(cmd);
+            });
         }
     }
 }
