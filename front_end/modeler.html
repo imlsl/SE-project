@@ -7,32 +7,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        .setting-btn {
-            background: rgba(56, 189, 248, 0.2);
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 0.75rem;
-            color: #38bdf8;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .setting-btn:hover {
-            background: rgba(56, 189, 248, 0.4);
-            transform: translateY(-1px);
-        }
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            width: 100%;
-            justify-content: flex-end;
-        }
-    </style>
 </head>
 <body>
 <div class="bg-glow"></div>
@@ -56,41 +30,17 @@
 <script src="js/auth.js"></script>
 <script src="js/common.js"></script>
 <script>
-    const authManager = new AuthManager();
-    
-    function checkAuth() {
-        if (!authManager.isLoggedIn()) {
-            window.location.href = 'index.html';
-            return false;
-        }
-        
-        const currentUser = authManager.getCurrentUser();
-        if (currentUser.role !== 'scene_modeler') {
-            alert('权限不足');
-            window.location.href = 'index.html';
-            return false;
-        }
-        
-        return true;
-    }
-    
-    if (checkAuth()) {
-        const currentUser = authManager.getCurrentUser();
-        //document.getElementById('currentUsernameSpan').textContent = currentUser.username;
-        
-        const modelerUI = new SceneModelerUI('roleSpecificPanel', currentUser.username);
+    const session = requireLogin({
+        expectedRole: 'scene_modeler',
+        deniedMessage: '权限不足'
+    });
+
+    if (session) {
+        const modelerUI = new SceneModelerUI('roleSpecificPanel', session.currentUser.username);
         modelerUI.render();
     }
     
-    // 个人设置按钮
-    document.getElementById('profileBtn').addEventListener('click', () => {
-        window.location.href = 'profile.html';
-    });
-    
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-        authManager.logout();
-        window.location.href = 'index.html';
-    });
+    bindShellActions({ authManager: session ? session.authManager : new AuthManager() });
 </script>
 </body>
 </html>

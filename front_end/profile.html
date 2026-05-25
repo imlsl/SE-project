@@ -472,16 +472,12 @@
 <script src="js/auth.js"></script>
 <script src="js/common.js"></script>
 <script>
-    const authManager = new AuthManager();
+    const session = requireLogin();
     const baseUrl = 'http://127.0.0.1:8000';
-    
-    // 检查登录状态
-    if (!authManager.isLoggedIn()) {
-        window.location.href = 'index.html';
-    }
-    
-    const currentUser = authManager.getCurrentUser();
-    
+    const authManager = session ? session.authManager : new AuthManager();
+    const currentUser = session ? session.currentUser : null;
+
+    if (session) {
     const roleNames = {
         'system_admin': '系统管理员',
         'industry_analyst': '行业分析师',
@@ -692,6 +688,7 @@
     
     // 初始化
     loadUserProfile();
+    }
 </script>
 </body>
 </html>

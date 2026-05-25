@@ -17,6 +17,57 @@ function redirectByRole(role) {
     }
 }
 
+// 获取当前登录用户
+function getCurrentUser() {
+    const authManager = new AuthManager();
+    return authManager.getCurrentUser();
+}
+
+// 检查登录状态并可选校验角色
+function requireLogin(options = {}) {
+    const authManager = new AuthManager();
+    const redirectTo = options.redirectTo || 'index.html';
+    const deniedMessage = options.deniedMessage || '权限不足';
+    const expectedRole = options.expectedRole;
+
+    if (!authManager.isLoggedIn()) {
+        window.location.href = redirectTo;
+        return null;
+    }
+
+    const currentUser = authManager.getCurrentUser();
+    if (expectedRole && currentUser.role !== expectedRole) {
+        alert(deniedMessage);
+        window.location.href = redirectTo;
+        return null;
+    }
+
+    return { authManager, currentUser };
+}
+
+// 绑定通用页面按钮
+function bindShellActions(options = {}) {
+    const authManager = options.authManager || new AuthManager();
+    const profileBtnId = options.profileBtnId || 'profileBtn';
+    const logoutBtnId = options.logoutBtnId || 'logoutBtn';
+    const redirectTo = options.redirectTo || 'index.html';
+
+    const profileBtn = document.getElementById(profileBtnId);
+    if (profileBtn) {
+        profileBtn.addEventListener('click', () => {
+            window.location.href = options.profilePage || 'profile.html';
+        });
+    }
+
+    const logoutBtn = document.getElementById(logoutBtnId);
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            authManager.logout();
+            window.location.href = redirectTo;
+        });
+    }
+}
+
 // 显示提示消息
 function showMessage(message, type = 'info') {
     const msgDiv = document.createElement('div');
