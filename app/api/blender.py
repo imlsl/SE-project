@@ -5,9 +5,10 @@ from app.services.blender_service import BlenderService
 router = APIRouter(prefix="/blender", tags=["blender"])
 
 class SceneGenerationRequest(BaseModel):
-    city_name: str
-    scale: float
-    style: str  # 例如: "cyberpunk", "modern", "low-poly"
+    city_name: str = ""
+    scale: float = 1.0
+    style: str = "default"
+    instruction: str = ""
 
 @router.post("/generate")
 async def generate_scene(request: SceneGenerationRequest):
