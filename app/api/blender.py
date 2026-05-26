@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import os
 from app.services.blender_service import BlenderService
 
 router = APIRouter(prefix="/blender", tags=["blender"])
@@ -25,3 +27,19 @@ async def get_task_status(task_id: str):
     """
     status = await BlenderService.check_generation_status(task_id)
     return status
+
+@router.get("/download/{task_id}")
+async def download_scene(task_id: str):
+    """
+    下载生成的城市场景模型文件
+    """
+    file_path = os.path.abspath(f"data/exports/output_{task_id}.blend")
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Model file not found or generation not completed.")
+        
+    return FileResponse(
+        path=file_path, 
+        filename=f"city_scene_{task_id}.blend",
+        media_type="application/octet-stream"
+    )

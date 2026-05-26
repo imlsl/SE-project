@@ -20,6 +20,7 @@ env/
 .DS_Store
 Thumbs.db
 
-# Logs and json
+# Logs and data files
 admin_operations.log
 system_uptime.json
+data/exports/*.blend

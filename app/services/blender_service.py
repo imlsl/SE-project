@@ -3,8 +3,15 @@ import asyncio
 import os
 import uuid
 import tempfile
+import subprocess
+from dotenv import load_dotenv
+
+# 加载 .env 文件，使用绝对路径确保能找到
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+load_dotenv(env_path)
 
 # 在 .env 中替换为你电脑上实际的 Blender 可执行文件路径
+# 例如: BLENDER_URL="D:/Blender/Blender Foundation/Blender 4.1/blender.exe"
 BLENDER_URL = os.getenv("BLENDER_URL")
 
 logger = logging.getLogger(__name__)
@@ -28,6 +35,9 @@ class BlenderService:
     async def _run_blender_task(task_id: str, parameters: dict):
         
         blender_executable = BLENDER_URL
+        
+        if not blender_executable or not os.path.exists(blender_executable):
+            logger.error(f"Blender executable not found at: {blender_executable}")
         
         # 确保输出目录存在
         os.makedirs("data/exports", exist_ok=True)
@@ -74,21 +84,24 @@ sys.exit(0)
             script_path = script_file.name
             
         try:
-            # -b: 后台模式(无UI)  -P <script>: 执行python脚本
-            process = await asyncio.create_subprocess_exec(
-                blender_executable,
-                "-b", "-P", script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+            # 使用 asyncio.to_thread 和 subprocess.run 替代 create_subprocess_exec
+            # 这样可以绕过 Windows 上部分 EventLoop 不支持子进程的限制
+            def run_blender():
+                return subprocess.run(
+                    [blender_executable, "-b", "-P", script_path],
+                    capture_output=True,
+                    text=False
+                )
+            
+            process = await asyncio.to_thread(run_blender)
             
             if process.returncode == 0:
                 logger.info(f"Task {task_id} completed. Saved to {output_blend}")
             else:
-                logger.error(f"Task {task_id} failed: {stderr.decode('utf-8', errors='ignore')}")
+                stderr_text = process.stderr.decode('utf-8', errors='ignore') if process.stderr else "Unknown Error"
+                logger.error(f"Task {task_id} failed: {stderr_text}")
         except Exception as ex:
-            logger.error(f"Failed to start Blender process: {ex}")
+            logger.error(f"Failed to start Blender process: {ex}", exc_info=True)
         finally:
             os.remove(script_path)
 
@@ -104,7 +117,6 @@ sys.exit(0)
             return {
                 "task_id": task_id,
                 "status": "completed",
-                # 你可以在API层单独提供一个下载此文件的路由
                 "download_url": f"/blender/download/{task_id}"
             }
             
