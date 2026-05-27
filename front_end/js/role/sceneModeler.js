@@ -4,6 +4,7 @@ class SceneModelerUI extends BaseRoleUI {
         super(containerId, username);
         this.scenes = [];
         this.selectedScene = null;
+        this.editAssets = [];
         this.blenderBridge = window.blenderBridge;
     }
 
@@ -40,6 +41,82 @@ class SceneModelerUI extends BaseRoleUI {
                     </div>
                 </div>
 
+                <div class="glass-card" id="sceneEditPanel" style="padding: 1.5rem; margin-bottom: 1rem; display: none;">
+                    <div class="panel-title">
+                        <i class="fas fa-pen"></i> 场景编辑面板
+                        <span id="editSceneBadge" style="font-size: 0.8rem; margin-left: 0.5rem; color: #94a3b8;"></span>
+                        <button class="small-btn outline" id="closeEditPanelBtn" style="margin-left: auto;">关闭</button>
+                    </div>
+                    <div style="display: grid; gap: 0.75rem; margin-top: 0.75rem;">
+                        <div>
+                            <label style="font-size: 0.85rem; color: #94a3b8;">场景名称</label>
+                            <input id="editSceneName" placeholder="请输入场景名称" style="width: 100%; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: #94a3b8;">状态</label>
+                            <select id="editSceneStatus" style="width: 100%; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                <option value="draft">草稿</option>
+                                <option value="published">已发布</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="small-btn" id="saveSceneBtn"><i class="fas fa-save"></i> 保存</button>
+                            <button class="small-btn outline" id="resetSceneBtn"><i class="fas fa-undo"></i> 重置</button>
+                            <button class="small-btn outline" id="applySceneTemplateBtn"><i class="fas fa-wand-magic-sparkles"></i> 使用模板生成</button>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #64748b;">
+                            在此面板修改场景名称与状态；模板生成将调用 Blender 生成流程。
+                        </div>
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <button class="small-btn outline" data-edit-tab="assets">资产</button>
+                            <button class="small-btn outline" data-edit-tab="layout">布局</button>
+                            <button class="small-btn outline" data-edit-tab="sketch">草图</button>
+                            <button class="small-btn outline" data-edit-tab="llm">LLM</button>
+                            <button class="small-btn outline" data-edit-tab="render">渲染</button>
+                        </div>
+                        <div id="editTab_assets" style="margin-top: 0.75rem;">
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input id="editAssetSearch" placeholder="搜索资产" style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                <button class="small-btn outline" id="editAssetAddBtn">添加</button>
+                            </div>
+                            <div id="editAssetList" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">暂无已选资产</div>
+                        </div>
+                        <div id="editTab_layout" style="margin-top: 0.75rem; display: none;">
+                            <textarea id="editLayoutInput" placeholder="布局点集: x1,y1;x2,y2;..." style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; height: 72px;"></textarea>
+                            <div style="margin-top: 0.5rem;">
+                                <button class="small-btn outline" id="editApplyLayoutBtn">应用布局</button>
+                            </div>
+                        </div>
+                        <div id="editTab_sketch" style="margin-top: 0.75rem; display: none;">
+                            <input type="file" id="editSketchUpload" accept="image/*" />
+                            <button class="small-btn outline" id="editProcessSketchBtn" style="margin-left: 0.5rem;">处理草图</button>
+                        </div>
+                        <div id="editTab_llm" style="margin-top: 0.75rem; display: none;">
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input id="editLlmInput" placeholder="输入自然语言指令" style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                <button class="small-btn outline" id="editSendLlmBtn">发送</button>
+                            </div>
+                        </div>
+                        <div id="editTab_render" style="margin-top: 0.75rem; display: none;">
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <select id="renderQualitySelect" style="padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                    <option value="draft">草稿质量</option>
+                                    <option value="balanced">均衡质量</option>
+                                    <option value="high">高质量</option>
+                                </select>
+                                <button class="small-btn" id="renderSceneBtn">开始渲染</button>
+                                <button class="small-btn outline" id="renderDownloadBtn" style="display: none;">下载结果</button>
+                            </div>
+                            <div id="renderResult" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">渲染结果将显示在这里</div>
+                            <div id="renderPreview" style="margin-top: 0.5rem; padding: 1rem; border: 1px dashed #334155; border-radius: 0.75rem; text-align: center; color: #94a3b8; display: none;">
+                                <div style="height: 140px; border-radius: 0.5rem; background: linear-gradient(135deg, #1e293b, #0f172a); display: flex; align-items: center; justify-content: center;">渲染预览占位图</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div class="panel-title">
                         <i class="fas fa-boxes"></i> 资产库
@@ -55,46 +132,11 @@ class SceneModelerUI extends BaseRoleUI {
 
                 <div class="glass-card" style="padding: 1.5rem;">
                     <div class="panel-title">
-                        <i class="fas fa-chalkboard"></i> Blender集成面板
-                        <button class="small-btn outline" id="toggleBlenderPanel" style="margin-left: auto;">展开/收起</button>
+                        <i class="fas fa-terminal"></i> 操作日志
                     </div>
-                    <div id="blenderSimulatePanel" style="display: none;">
-                        <div style="margin-bottom: 1rem;">
-                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">模板ID</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <input id="templateInput" placeholder="例如: 模板0" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
-                                        <button class="small-btn outline" id="applyTemplateBtn">应用模板</button>
-                                    </div>
-                                </div>
-
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">布局输入 (点集/连线)</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <textarea id="layoutInput" placeholder="格式: x1,y1;x2,y2;..." style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0; height:64px;"></textarea>
-                                    </div>
-                                    <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
-                                        <button class="small-btn outline" id="applyLayoutBtn">应用布局</button>
-                                        <input type="file" id="sketchUpload" accept="image/*" style="display:inline-block;" />
-                                        <button class="small-btn outline" id="processSketchBtn">处理草图</button>
-                                    </div>
-                                </div>
-
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">自然语言指令</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <input id="llmInput" placeholder="在十字路口添加路灯" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
-                                        <button class="small-btn outline" id="sendLLMBtn">发送</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div style="margin-top: 1rem;">
-                                <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 180px; overflow-y: auto;" id="simulateOutput">
-                                    <div style="color: #a78bfa;">[系统] Blender插件已就绪</div>
-                                </div>
-                            </div>
+                    <div style="margin-top: 0.75rem;">
+                        <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 180px; overflow-y: auto;" id="simulateOutput">
+                            <div style="color: #a78bfa;">[系统] Blender插件已就绪</div>
                         </div>
                     </div>
                 </div>
@@ -212,14 +254,6 @@ class SceneModelerUI extends BaseRoleUI {
             });
         }
         
-        // Blender面板切换
-        const toggleBtn = document.getElementById('toggleBlenderPanel');
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                const panel = document.getElementById('blenderSimulatePanel');
-                if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            });
-        }
         
         // 资产点击事件
         document.querySelectorAll('.asset-item').forEach(item => {
@@ -233,8 +267,13 @@ class SceneModelerUI extends BaseRoleUI {
             });
         });
         
+        // 初始化日志输出
+        if (this.blenderBridge && !this.blenderBridge.outputElement) {
+            this.blenderBridge.init('simulateOutput');
+        }
+
         this.bindSceneEvents();
-        this.bindBlenderEvents();
+        this.bindEditPanelEvents();
     }
 
     bindSceneEvents() {
@@ -244,10 +283,7 @@ class SceneModelerUI extends BaseRoleUI {
                 const id = parseInt(btn.dataset.id);
                 const scene = this.scenes.find(s => s.id === id);
                 if (scene) {
-                    this.showMessage(`编辑场景: ${scene.name}`, 'info');
-                    if (this.blenderBridge) {
-                        this.blenderBridge.applyTemplate(scene.name);
-                    }
+                    this.showEditPanel(scene);
                 }
             });
         });
@@ -283,96 +319,201 @@ class SceneModelerUI extends BaseRoleUI {
         });
     }
 
-    bindBlenderEvents() {
-        const addRoadTex = document.getElementById('simulateAddRoadTex');
-        const add3DLamp = document.getElementById('simulateAdd3DLamp');
-        const applyTemplate = document.getElementById('simulateTemplate0');
-        const llmCommand = document.getElementById('simulateLLMCommand');
-        
-        if (addRoadTex && this.blenderBridge) {
-            addRoadTex.addEventListener('click', () => this.blenderBridge.addAsset('texture', '道路纹理'));
+    bindEditPanelEvents() {
+        const closeBtn = document.getElementById('closeEditPanelBtn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.hideEditPanel());
         }
-        if (add3DLamp && this.blenderBridge) {
-            add3DLamp.addEventListener('click', () => this.blenderBridge.addAsset('model', '3D路灯'));
-        }
-        if (applyTemplate && this.blenderBridge) {
-            applyTemplate.addEventListener('click', () => this.blenderBridge.applyTemplate('城市基础模板_v0'));
-        }
-        if (llmCommand && this.blenderBridge) {
-            llmCommand.addEventListener('click', () => {
-                const command = prompt('请输入自然语言指令:', '在十字路口添加智能路灯');
-                if (command) this.blenderBridge.processLLMCommand(command);
+
+        const resetBtn = document.getElementById('resetSceneBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                if (this.selectedScene) {
+                    this.fillEditForm(this.selectedScene);
+                }
             });
         }
-        
-        // 初始化Blender桥接输出
-        if (this.blenderBridge && !this.blenderBridge.outputElement) {
-            this.blenderBridge.init('simulateOutput');
+
+        const saveBtn = document.getElementById('saveSceneBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                if (!this.selectedScene) return;
+                const nameInput = document.getElementById('editSceneName');
+                const statusSelect = document.getElementById('editSceneStatus');
+                const newName = nameInput ? nameInput.value.trim() : '';
+                const newStatus = statusSelect ? statusSelect.value : this.selectedScene.status;
+
+                if (!newName) {
+                    this.showMessage('请输入场景名称', 'error');
+                    return;
+                }
+
+                this.selectedScene.name = newName;
+                this.selectedScene.status = newStatus;
+                const sceneList = document.getElementById('sceneList');
+                if (sceneList) sceneList.innerHTML = this.renderSceneList();
+                this.bindSceneEvents();
+                this.showMessage('场景信息已更新（前端演示）', 'info');
+                this.updateEditBadge();
+            });
         }
 
-        // 新增：模板/布局/草图/LLM 控件绑定
-        const applyTemplateBtn = document.getElementById('applyTemplateBtn');
-        const templateInput = document.getElementById('templateInput');
-        const applyLayoutBtn = document.getElementById('applyLayoutBtn');
-        const layoutInput = document.getElementById('layoutInput');
-        const sketchUpload = document.getElementById('sketchUpload');
-        const processSketchBtn = document.getElementById('processSketchBtn');
-        const llmInput = document.getElementById('llmInput');
-        const sendLLMBtn = document.getElementById('sendLLMBtn');
-
-        if (applyTemplateBtn && this.blenderBridge) {
+        const applyTemplateBtn = document.getElementById('applySceneTemplateBtn');
+        if (applyTemplateBtn) {
             applyTemplateBtn.addEventListener('click', () => {
-                const tpl = templateInput ? templateInput.value.trim() : '城市基础模板_v0';
-                if (!tpl) return this.showMessage('请输入模板ID', 'error');
-                this.blenderBridge.applyTemplate(tpl);
+                if (!this.selectedScene) return;
+                if (this.blenderBridge) {
+                    this.blenderBridge.applyTemplate(this.selectedScene.name);
+                } else {
+                    this.showMessage('Blender桥接未初始化', 'error');
+                }
             });
         }
 
-        if (applyLayoutBtn && this.blenderBridge) {
-            applyLayoutBtn.addEventListener('click', () => {
-                const raw = layoutInput ? layoutInput.value.trim() : '';
-                if (!raw) return this.showMessage('请填写布局点集', 'error');
-                // 简单解析格式 x1,y1;x2,y2;...
+        document.querySelectorAll('[data-edit-tab]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.getAttribute('data-edit-tab');
+                this.switchEditTab(tab);
+            });
+        });
+
+        document.getElementById('editAssetAddBtn')?.addEventListener('click', () => {
+            const name = document.getElementById('editAssetSearch')?.value.trim();
+            if (!name) return this.showMessage('请输入资产名称', 'error');
+            this.editAssets.push(name);
+            this.renderEditAssets();
+            this.showMessage('资产已添加（前端演示）', 'info');
+            this.logEditAction(`编辑面板: 添加资产 ${name}`);
+        });
+
+        document.getElementById('editAssetList')?.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (!target.matches('[data-remove-asset]')) return;
+            const index = parseInt(target.getAttribute('data-remove-asset'), 10);
+            if (isNaN(index)) return;
+            const removed = this.editAssets.splice(index, 1);
+            this.renderEditAssets();
+            if (removed[0]) {
+                this.logEditAction(`编辑面板: 移除资产 ${removed[0]}`);
+            }
+        });
+
+        document.getElementById('editApplyLayoutBtn')?.addEventListener('click', () => {
+            const raw = document.getElementById('editLayoutInput')?.value.trim();
+            if (!raw) return this.showMessage('请填写布局点集', 'error');
+            if (this.blenderBridge) {
                 const points = raw.split(';').map(p => {
                     const [x,y] = p.split(',').map(s => parseFloat(s));
                     return { x: isNaN(x)?0:x, y: isNaN(y)?0:y };
                 }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
                 this.blenderBridge.applyLayout({ points });
-            });
-        }
+            }
+            this.logEditAction('编辑面板: 应用布局');
+        });
 
-        if (processSketchBtn && sketchUpload && this.blenderBridge) {
-            processSketchBtn.addEventListener('click', () => {
-                const file = sketchUpload.files && sketchUpload.files[0];
-                if (!file) return this.showMessage('请先选择草图文件', 'error');
+        document.getElementById('editProcessSketchBtn')?.addEventListener('click', () => {
+            const file = document.getElementById('editSketchUpload')?.files?.[0];
+            if (!file) return this.showMessage('请先选择草图文件', 'error');
+            if (this.blenderBridge) {
                 this.blenderBridge.processSketch(file.name);
-            });
-        }
+            }
+            this.logEditAction(`编辑面板: 处理草图 ${file.name}`);
+        });
 
-        if (sendLLMBtn && llmInput && this.blenderBridge) {
-            sendLLMBtn.addEventListener('click', async () => {
-                const cmd = llmInput.value.trim();
-                if (!cmd) return this.showMessage('请输入指令文本', 'error');
-
+        document.getElementById('editSendLlmBtn')?.addEventListener('click', () => {
+            const cmd = document.getElementById('editLlmInput')?.value.trim();
+            if (!cmd) return this.showMessage('请输入指令文本', 'error');
+            if (this.blenderBridge) {
                 this.blenderBridge.processLLMCommand(cmd);
-                try {
-                    const response = await this.apiRequest('/modeler/blender/llm-command', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Username': this.username
-                        },
-                        body: JSON.stringify({ command: cmd })
-                    });
+            }
+            this.logEditAction(`编辑面板: LLM 指令 ${cmd}`);
+        });
 
-                    if (response && this.blenderBridge && this.blenderBridge.log) {
-                        this.blenderBridge.log(`后端解析结果: ${JSON.stringify(response)}`);
-                    }
-                } catch (error) {
-                    console.error('LLM 指令处理失败:', error);
-                    this.showMessage('LLM 指令处理失败', 'error');
-                }
-            });
+        document.getElementById('renderSceneBtn')?.addEventListener('click', () => {
+            const quality = document.getElementById('renderQualitySelect')?.value || 'balanced';
+            const result = document.getElementById('renderResult');
+            if (result) result.textContent = `渲染任务已提交（质量: ${quality}）`;
+            const preview = document.getElementById('renderPreview');
+            if (preview) preview.style.display = 'block';
+            const downloadBtn = document.getElementById('renderDownloadBtn');
+            if (downloadBtn) downloadBtn.style.display = 'inline-flex';
+            this.showMessage('渲染任务已提交（前端演示）', 'info');
+            this.logEditAction(`编辑面板: 提交渲染 (${quality})`);
+        });
+
+        document.getElementById('renderDownloadBtn')?.addEventListener('click', () => {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="100%" height="100%" fill="#0f172a"/><text x="50%" y="50%" fill="#94a3b8" font-size="24" font-family="Arial" dominant-baseline="middle" text-anchor="middle">Render Preview</text></svg>`;
+            const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'render_preview.svg';
+            link.click();
+            this.showMessage('已下载渲染结果（占位）', 'info');
+        });
+    }
+
+    showEditPanel(scene) {
+        this.selectedScene = scene;
+        this.editAssets = [];
+        const panel = document.getElementById('sceneEditPanel');
+        if (panel) panel.style.display = 'block';
+        this.fillEditForm(scene);
+        this.updateEditBadge();
+        this.renderEditAssets();
+        this.switchEditTab('assets');
+        panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    hideEditPanel() {
+        const panel = document.getElementById('sceneEditPanel');
+        if (panel) panel.style.display = 'none';
+        this.selectedScene = null;
+        const badge = document.getElementById('editSceneBadge');
+        if (badge) badge.textContent = '';
+    }
+
+    switchEditTab(tab) {
+        const tabs = ['assets','layout','sketch','llm','render'];
+        tabs.forEach(key => {
+            const panel = document.getElementById(`editTab_${key}`);
+            if (panel) panel.style.display = key === tab ? 'block' : 'none';
+        });
+    }
+
+    fillEditForm(scene) {
+        const nameInput = document.getElementById('editSceneName');
+        const statusSelect = document.getElementById('editSceneStatus');
+        if (nameInput) nameInput.value = scene.name || '';
+        if (statusSelect) statusSelect.value = scene.status || 'draft';
+    }
+
+    renderEditAssets() {
+        const list = document.getElementById('editAssetList');
+        if (!list) return;
+        if (this.editAssets.length === 0) {
+            list.textContent = '暂无已选资产';
+            return;
+        }
+        list.innerHTML = this.editAssets.map((name, idx) => (
+            `<div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                <span>${name}</span>
+                <button class="small-btn outline" data-remove-asset="${idx}" style="padding: 0.1rem 0.4rem; font-size: 0.7rem;">移除</button>
+            </div>`
+        )).join('');
+    }
+
+    updateEditBadge() {
+        const badge = document.getElementById('editSceneBadge');
+        if (badge && this.selectedScene) {
+            badge.textContent = `当前: ${this.selectedScene.name}`;
         }
     }
+
+    logEditAction(message) {
+        if (this.blenderBridge && this.blenderBridge.log) {
+            this.blenderBridge.log(message);
+        }
+    }
+
 }
