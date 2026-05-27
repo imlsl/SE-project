@@ -77,24 +77,21 @@ class IndustryAnalystUI extends BaseRoleUI {
     }
 
     async loadIndustryData() {
-        // 模拟从后端获取数据
-        this.industryData = {
-            totalProjects: 24,
-            activeScenes: 8,
-            totalReports: 156,
-            accuracy: '94%',
-            metrics: {
-                transportation: { value: 85, trend: '+12%', status: 'up' },
-                energy: { value: 72, trend: '+5%', status: 'up' },
-                environment: { value: 91, trend: '+3%', status: 'up' }
-            },
-            activities: [
-                { time: '10:30', action: '生成了第三季度城市交通分析报告', type: 'report' },
-                { time: '09:15', action: '新增了5个智慧交通场景数据', type: 'data' },
-                { time: '昨天', action: '完成了能源消耗趋势预测模型', type: 'model' },
-                { time: '昨天', action: '导出了环境监测月度报告', type: 'report' }
-            ]
-        };
+        try {
+            const response = await this.apiRequest('/analyst/dashboard', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response) {
+                this.industryData = response;
+            }
+        } catch (error) {
+            console.error('加载行业数据失败:', error);
+            this.showMessage('加载行业数据失败', 'error');
+        }
     }
 
     renderMetrics() {
@@ -174,11 +171,27 @@ class IndustryAnalystUI extends BaseRoleUI {
 
         const generateReportBtn = document.getElementById('generateReportBtn');
         if (generateReportBtn) {
-            generateReportBtn.addEventListener('click', () => {
+            generateReportBtn.addEventListener('click', async () => {
                 this.showMessage('报告生成中...', 'info');
-                setTimeout(() => {
-                    this.showMessage('报告已生成，请查看下载', 'info');
-                }, 1500);
+                try {
+                    const response = await this.apiRequest('/analyst/reports/generate', {
+                        method: 'POST',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && response.message) {
+                        this.showMessage(response.message, 'info');
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    } else {
+                        this.showMessage('报告已提交生成', 'info');
+                    }
+                } catch (error) {
+                    console.error('报告生成失败:', error);
+                    this.showMessage('报告生成失败', 'error');
+                }
             });
         }
 

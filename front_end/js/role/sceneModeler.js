@@ -106,12 +106,21 @@ class SceneModelerUI extends BaseRoleUI {
     }
 
     async loadScenes() {
-        // 模拟从后端获取场景列表
-        this.scenes = [
-            { id: 1, name: '智慧城市中心区', lastModified: '2024-01-15', status: 'published' },
-            { id: 2, name: '滨江新区规划', lastModified: '2024-01-10', status: 'draft' },
-            { id: 3, name: '科技园区', lastModified: '2024-01-05', status: 'published' }
-        ];
+        try {
+            const response = await this.apiRequest('/modeler/scenes', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response) {
+                this.scenes = response;
+            }
+        } catch (error) {
+            console.error('加载场景列表失败:', error);
+            this.showMessage('加载场景列表失败', 'error');
+        }
     }
 
     renderSceneList() {
@@ -157,19 +166,32 @@ class SceneModelerUI extends BaseRoleUI {
         // 创建场景
         const createSceneBtn = document.getElementById('createSceneBtn');
         if (createSceneBtn) {
-            createSceneBtn.addEventListener('click', () => {
+            createSceneBtn.addEventListener('click', async () => {
                 const sceneName = prompt('请输入场景名称:');
-                if (sceneName) {
-                    this.scenes.unshift({
-                        id: Date.now(),
-                        name: sceneName,
-                        lastModified: new Date().toISOString().split('T')[0],
-                        status: 'draft'
+                if (!sceneName) return;
+
+                try {
+                    const response = await this.apiRequest('/modeler/scenes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Username': this.username
+                        },
+                        body: JSON.stringify({ name: sceneName })
                     });
-                    const sceneList = document.getElementById('sceneList');
-                    if (sceneList) sceneList.innerHTML = this.renderSceneList();
-                    this.showMessage(`场景 "${sceneName}" 创建成功`, 'info');
-                    this.bindSceneEvents();
+
+                    if (response && !response.detail) {
+                        this.scenes.unshift(response);
+                        const sceneList = document.getElementById('sceneList');
+                        if (sceneList) sceneList.innerHTML = this.renderSceneList();
+                        this.showMessage(`场景 "${sceneName}" 创建成功`, 'info');
+                        this.bindSceneEvents();
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('创建场景失败:', error);
+                    this.showMessage('创建场景失败', 'error');
                 }
             });
         }
@@ -231,15 +253,31 @@ class SceneModelerUI extends BaseRoleUI {
         });
         
         document.querySelectorAll('.delete-scene').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const id = parseInt(btn.dataset.id);
-                if (confirm('确定要删除这个场景吗？')) {
-                    this.scenes = this.scenes.filter(s => s.id !== id);
-                    const sceneList = document.getElementById('sceneList');
-                    if (sceneList) sceneList.innerHTML = this.renderSceneList();
-                    this.showMessage('场景已删除', 'info');
-                    this.bindSceneEvents();
+                if (!confirm('确定要删除这个场景吗？')) return;
+
+                try {
+                    const response = await this.apiRequest(`/modeler/scenes/${id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && !response.detail) {
+                        this.scenes = this.scenes.filter(s => s.id !== id);
+                        const sceneList = document.getElementById('sceneList');
+                        if (sceneList) sceneList.innerHTML = this.renderSceneList();
+                        this.showMessage('场景已删除', 'info');
+                        this.bindSceneEvents();
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('删除场景失败:', error);
+                    this.showMessage('删除场景失败', 'error');
                 }
             });
         });
@@ -312,10 +350,28 @@ class SceneModelerUI extends BaseRoleUI {
         }
 
         if (sendLLMBtn && llmInput && this.blenderBridge) {
-            sendLLMBtn.addEventListener('click', () => {
+            sendLLMBtn.addEventListener('click', async () => {
                 const cmd = llmInput.value.trim();
                 if (!cmd) return this.showMessage('请输入指令文本', 'error');
+
                 this.blenderBridge.processLLMCommand(cmd);
+                try {
+                    const response = await this.apiRequest('/modeler/blender/llm-command', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Username': this.username
+                        },
+                        body: JSON.stringify({ command: cmd })
+                    });
+
+                    if (response && this.blenderBridge && this.blenderBridge.log) {
+                        this.blenderBridge.log(`后端解析结果: ${JSON.stringify(response)}`);
+                    }
+                } catch (error) {
+                    console.error('LLM 指令处理失败:', error);
+                    this.showMessage('LLM 指令处理失败', 'error');
+                }
             });
         }
     }
