@@ -54,8 +54,9 @@ class SceneEditorUI extends BaseRoleUI {
                                 <option value="published" ${this.scene.status === 'published' ? 'selected' : ''}>已发布</option>
                             </select>
                         </div>
-                        <div style="display: flex; gap: 0.5rem;">
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                             <button class="small-btn" id="saveSceneBtn"><i class="fas fa-save"></i> 保存</button>
+                            <input id="editTemplateId" placeholder="模板ID（如 0）" style="flex: 1; min-width: 160px; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                             <button class="small-btn outline" id="applySceneTemplateBtn"><i class="fas fa-wand-magic-sparkles"></i> 使用模板生成</button>
                         </div>
                         <div style="font-size: 0.75rem; color: #64748b;">
@@ -158,8 +159,15 @@ class SceneEditorUI extends BaseRoleUI {
         });
 
         document.getElementById('applySceneTemplateBtn')?.addEventListener('click', () => {
+            const templateId = document.getElementById('editTemplateId')?.value.trim();
+            const templateValue = templateId || this.scene.name;
+            if (!templateValue) {
+                this.showMessage('请输入模板ID', 'error');
+                return;
+            }
+
             if (this.blenderBridge) {
-                this.blenderBridge.applyTemplate(this.scene.name);
+                this.blenderBridge.applyTemplate(templateValue);
             } else {
                 this.showMessage('Blender桥接未初始化', 'error');
             }
