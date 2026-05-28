@@ -99,24 +99,40 @@ class BlenderBridge {
         return true;
     }
 
-    processLLMCommand(command) {
+    async processLLMCommand(command) {
         this.log(`LLM指令: "${command}"`);
-        this.log(`解析自然语言...`);
-        
-        // 简单的命令解析示例
-        setTimeout(() => {
-            if (command.includes('道路') || command.includes('路')) {
-                this.log(`识别到道路生成需求，自动添加道路纹理资产`);
-            } else if (command.includes('路灯') || command.includes('灯')) {
-                this.log(`识别到路灯需求，添加3D路灯模型`);
-            } else if (command.includes('建筑') || command.includes('楼')) {
-                this.log(`识别到建筑需求，生成建筑群`);
+        this.log(`联系后端发送AI生成指令...`);
+        try {
+            const response = await fetch('http://127.0.0.1:8000/blender/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    instruction: command
+                })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                this.log(`后端已接受AI生成任务，Task ID: ${data.task_id}`);
+                
+                const checkStatus = async () => {
+                    const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        this.log(`任务状态: ${statusData.status}`);
+                        if (statusData.status === 'completed') {
+                            this.log(`AI指令执行完成，模型已生成 (下载链接: ${statusData.download_url})`);
+                        } else {
+                            setTimeout(checkStatus, 1500);
+                        }
+                    }
+                };
+                setTimeout(checkStatus, 1000);
             } else {
-                this.log(`未能识别具体指令，请尝试更详细的描述`);
+                this.log(`发生错误: 请求后端失败`);
             }
-            this.log(`LLM处理完成`);
-        }, 1000);
-        
+        } catch (e) {
+            this.log(`后端网络错误, 无法执行指令: ${e}`);
+        }
         return true;
     }
 
@@ -130,4 +146,4 @@ class BlenderBridge {
 }
 
 // 全局单例
-window.blenderBridge = null;
+window.blenderBridge = new BlenderBridge();

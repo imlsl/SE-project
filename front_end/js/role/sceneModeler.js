@@ -4,7 +4,10 @@ class SceneModelerUI extends BaseRoleUI {
         super(containerId, username);
         this.scenes = [];
         this.selectedScene = null;
-        this.blenderBridge = window.blenderBridge;
+    }
+
+    get blenderBridge() {
+        return window.blenderBridge;
     }
 
     async render() {
@@ -40,6 +43,7 @@ class SceneModelerUI extends BaseRoleUI {
                     </div>
                 </div>
 
+
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div class="panel-title">
                         <i class="fas fa-boxes"></i> 资产库
@@ -53,51 +57,6 @@ class SceneModelerUI extends BaseRoleUI {
                     </div>
                 </div>
 
-                <div class="glass-card" style="padding: 1.5rem;">
-                    <div class="panel-title">
-                        <i class="fas fa-chalkboard"></i> Blender集成面板
-                        <button class="small-btn outline" id="toggleBlenderPanel" style="margin-left: auto;">展开/收起</button>
-                    </div>
-                    <div id="blenderSimulatePanel" style="display: none;">
-                        <div style="margin-bottom: 1rem;">
-                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">模板ID</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <input id="templateInput" placeholder="例如: 模板0" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
-                                        <button class="small-btn outline" id="applyTemplateBtn">应用模板</button>
-                                    </div>
-                                </div>
-
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">布局输入 (点集/连线)</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <textarea id="layoutInput" placeholder="格式: x1,y1;x2,y2;..." style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0; height:64px;"></textarea>
-                                    </div>
-                                    <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
-                                        <button class="small-btn outline" id="applyLayoutBtn">应用布局</button>
-                                        <input type="file" id="sketchUpload" accept="image/*" style="display:inline-block;" />
-                                        <button class="small-btn outline" id="processSketchBtn">处理草图</button>
-                                    </div>
-                                </div>
-
-                                <div style="flex:1; min-width:220px;">
-                                    <label style="font-size:0.85rem; color:#94a3b8;">自然语言指令</label>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-                                        <input id="llmInput" placeholder="在十字路口添加路灯" style="flex:1; padding:0.5rem; border-radius:0.5rem; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
-                                        <button class="small-btn outline" id="sendLLMBtn">发送</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div style="margin-top: 1rem;">
-                                <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 180px; overflow-y: auto;" id="simulateOutput">
-                                    <div style="color: #a78bfa;">[系统] Blender插件已就绪</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         `;
         
@@ -106,12 +65,21 @@ class SceneModelerUI extends BaseRoleUI {
     }
 
     async loadScenes() {
-        // 模拟从后端获取场景列表
-        this.scenes = [
-            { id: 1, name: '智慧城市中心区', lastModified: '2024-01-15', status: 'published' },
-            { id: 2, name: '滨江新区规划', lastModified: '2024-01-10', status: 'draft' },
-            { id: 3, name: '科技园区', lastModified: '2024-01-05', status: 'published' }
-        ];
+        try {
+            const response = await this.apiRequest('/modeler/scenes', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response) {
+                this.scenes = response;
+            }
+        } catch (error) {
+            console.error('加载场景列表失败:', error);
+            this.showMessage('加载场景列表失败', 'error');
+        }
     }
 
     renderSceneList() {
@@ -157,19 +125,32 @@ class SceneModelerUI extends BaseRoleUI {
         // 创建场景
         const createSceneBtn = document.getElementById('createSceneBtn');
         if (createSceneBtn) {
-            createSceneBtn.addEventListener('click', () => {
+            createSceneBtn.addEventListener('click', async () => {
                 const sceneName = prompt('请输入场景名称:');
-                if (sceneName) {
-                    this.scenes.unshift({
-                        id: Date.now(),
-                        name: sceneName,
-                        lastModified: new Date().toISOString().split('T')[0],
-                        status: 'draft'
+                if (!sceneName) return;
+
+                try {
+                    const response = await this.apiRequest('/modeler/scenes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Username': this.username
+                        },
+                        body: JSON.stringify({ name: sceneName })
                     });
-                    const sceneList = document.getElementById('sceneList');
-                    if (sceneList) sceneList.innerHTML = this.renderSceneList();
-                    this.showMessage(`场景 "${sceneName}" 创建成功`, 'info');
-                    this.bindSceneEvents();
+
+                    if (response && !response.detail) {
+                        this.scenes.unshift(response);
+                        const sceneList = document.getElementById('sceneList');
+                        if (sceneList) sceneList.innerHTML = this.renderSceneList();
+                        this.showMessage(`场景 "${sceneName}" 创建成功`, 'info');
+                        this.bindSceneEvents();
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('创建场景失败:', error);
+                    this.showMessage('创建场景失败', 'error');
                 }
             });
         }
@@ -190,14 +171,6 @@ class SceneModelerUI extends BaseRoleUI {
             });
         }
         
-        // Blender面板切换
-        const toggleBtn = document.getElementById('toggleBlenderPanel');
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                const panel = document.getElementById('blenderSimulatePanel');
-                if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            });
-        }
         
         // 资产点击事件
         document.querySelectorAll('.asset-item').forEach(item => {
@@ -212,7 +185,6 @@ class SceneModelerUI extends BaseRoleUI {
         });
         
         this.bindSceneEvents();
-        this.bindBlenderEvents();
     }
 
     bindSceneEvents() {
@@ -222,101 +194,47 @@ class SceneModelerUI extends BaseRoleUI {
                 const id = parseInt(btn.dataset.id);
                 const scene = this.scenes.find(s => s.id === id);
                 if (scene) {
-                    this.showMessage(`编辑场景: ${scene.name}`, 'info');
-                    if (this.blenderBridge) {
-                        this.blenderBridge.applyTemplate(scene.name);
-                    }
+                    const payload = {
+                        id: scene.id,
+                        name: scene.name,
+                        status: scene.status,
+                        lastModified: scene.lastModified
+                    };
+                    localStorage.setItem('smartcity_edit_scene', JSON.stringify(payload));
+                    window.location.href = 'scene_edit.html';
                 }
             });
         });
         
         document.querySelectorAll('.delete-scene').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const id = parseInt(btn.dataset.id);
-                if (confirm('确定要删除这个场景吗？')) {
-                    this.scenes = this.scenes.filter(s => s.id !== id);
-                    const sceneList = document.getElementById('sceneList');
-                    if (sceneList) sceneList.innerHTML = this.renderSceneList();
-                    this.showMessage('场景已删除', 'info');
-                    this.bindSceneEvents();
+                if (!confirm('确定要删除这个场景吗？')) return;
+
+                try {
+                    const response = await this.apiRequest(`/modeler/scenes/${id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && !response.detail) {
+                        this.scenes = this.scenes.filter(s => s.id !== id);
+                        const sceneList = document.getElementById('sceneList');
+                        if (sceneList) sceneList.innerHTML = this.renderSceneList();
+                        this.showMessage('场景已删除', 'info');
+                        this.bindSceneEvents();
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('删除场景失败:', error);
+                    this.showMessage('删除场景失败', 'error');
                 }
             });
         });
     }
 
-    bindBlenderEvents() {
-        const addRoadTex = document.getElementById('simulateAddRoadTex');
-        const add3DLamp = document.getElementById('simulateAdd3DLamp');
-        const applyTemplate = document.getElementById('simulateTemplate0');
-        const llmCommand = document.getElementById('simulateLLMCommand');
-        
-        if (addRoadTex && this.blenderBridge) {
-            addRoadTex.addEventListener('click', () => this.blenderBridge.addAsset('texture', '道路纹理'));
-        }
-        if (add3DLamp && this.blenderBridge) {
-            add3DLamp.addEventListener('click', () => this.blenderBridge.addAsset('model', '3D路灯'));
-        }
-        if (applyTemplate && this.blenderBridge) {
-            applyTemplate.addEventListener('click', () => this.blenderBridge.applyTemplate('城市基础模板_v0'));
-        }
-        if (llmCommand && this.blenderBridge) {
-            llmCommand.addEventListener('click', () => {
-                const command = prompt('请输入自然语言指令:', '在十字路口添加智能路灯');
-                if (command) this.blenderBridge.processLLMCommand(command);
-            });
-        }
-        
-        // 初始化Blender桥接输出
-        if (this.blenderBridge && !this.blenderBridge.outputElement) {
-            this.blenderBridge.init('simulateOutput');
-        }
-
-        // 新增：模板/布局/草图/LLM 控件绑定
-        const applyTemplateBtn = document.getElementById('applyTemplateBtn');
-        const templateInput = document.getElementById('templateInput');
-        const applyLayoutBtn = document.getElementById('applyLayoutBtn');
-        const layoutInput = document.getElementById('layoutInput');
-        const sketchUpload = document.getElementById('sketchUpload');
-        const processSketchBtn = document.getElementById('processSketchBtn');
-        const llmInput = document.getElementById('llmInput');
-        const sendLLMBtn = document.getElementById('sendLLMBtn');
-
-        if (applyTemplateBtn && this.blenderBridge) {
-            applyTemplateBtn.addEventListener('click', () => {
-                const tpl = templateInput ? templateInput.value.trim() : '城市基础模板_v0';
-                if (!tpl) return this.showMessage('请输入模板ID', 'error');
-                this.blenderBridge.applyTemplate(tpl);
-            });
-        }
-
-        if (applyLayoutBtn && this.blenderBridge) {
-            applyLayoutBtn.addEventListener('click', () => {
-                const raw = layoutInput ? layoutInput.value.trim() : '';
-                if (!raw) return this.showMessage('请填写布局点集', 'error');
-                // 简单解析格式 x1,y1;x2,y2;...
-                const points = raw.split(';').map(p => {
-                    const [x,y] = p.split(',').map(s => parseFloat(s));
-                    return { x: isNaN(x)?0:x, y: isNaN(y)?0:y };
-                }).filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
-                this.blenderBridge.applyLayout({ points });
-            });
-        }
-
-        if (processSketchBtn && sketchUpload && this.blenderBridge) {
-            processSketchBtn.addEventListener('click', () => {
-                const file = sketchUpload.files && sketchUpload.files[0];
-                if (!file) return this.showMessage('请先选择草图文件', 'error');
-                this.blenderBridge.processSketch(file.name);
-            });
-        }
-
-        if (sendLLMBtn && llmInput && this.blenderBridge) {
-            sendLLMBtn.addEventListener('click', () => {
-                const cmd = llmInput.value.trim();
-                if (!cmd) return this.showMessage('请输入指令文本', 'error');
-                this.blenderBridge.processLLMCommand(cmd);
-            });
-        }
-    }
 }

@@ -194,13 +194,20 @@ class SystemAdminUI extends BaseRoleUI {
     }
 
     async loadSystemLogs() {
-        // 模拟系统日志，可以后续对接真实API
-        this.systemLogs = [
-            `系统启动 - ${new Date().toLocaleString()}`,
-            `管理员 ${this.username} 登录 - ${new Date().toLocaleString()}`,
-            '用户管理模块初始化完成',
-            '等待操作...'
-        ];
+        try {
+            const response = await this.apiRequest('/admin/users/system/logs', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response) {
+                this.systemLogs = response;
+            }
+        } catch (error) {
+            console.error('加载系统日志失败:', error);
+        }
     }
 
     renderLogs() {
@@ -321,13 +328,29 @@ class SystemAdminUI extends BaseRoleUI {
         
         const clearLogsBtn = document.getElementById('clearLogsBtn');
         if (clearLogsBtn) {
-            clearLogsBtn.addEventListener('click', () => {
-                this.systemLogs = [];
-                const logContainer = document.getElementById('logContainer');
-                if (logContainer) {
-                    logContainer.innerHTML = '<div style="text-align: center; padding: 2rem; color: #64748b;">日志已清空</div>';
+            clearLogsBtn.addEventListener('click', async () => {
+                try {
+                    const response = await this.apiRequest('/admin/users/system/logs', {
+                        method: 'DELETE',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && !response.detail) {
+                        this.systemLogs = [];
+                        const logContainer = document.getElementById('logContainer');
+                        if (logContainer) {
+                            logContainer.innerHTML = '<div style="text-align: center; padding: 2rem; color: #64748b;">日志已清空</div>';
+                        }
+                        this.showMessage('系统日志已清空', 'info');
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('清空系统日志失败:', error);
+                    this.showMessage('清空系统日志失败', 'error');
                 }
-                this.showMessage('系统日志已清空', 'info');
             });
         }
         

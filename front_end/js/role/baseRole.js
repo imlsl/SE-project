@@ -88,30 +88,34 @@ class BaseRoleUI {
 
     // 发起API请求
     async apiRequest(endpoint, options = {}) {
-        const token = localStorage.getItem('smartcity_current_user') ? 
-            JSON.parse(localStorage.getItem('smartcity_current_user')).token : null;
-        
+        const rawUser = localStorage.getItem('smartcity_current_user');
+        const currentUser = rawUser ? JSON.parse(rawUser) : null;
+        const token = currentUser ? currentUser.token : null;
+
         const headers = {
             'Content-Type': 'application/json',
             ...options.headers
         };
-        
-        if (token) {
+
+        if (token && !headers['Authorization']) {
             headers['Authorization'] = `Bearer ${token}`;
         }
-        
+        if (currentUser && currentUser.username && !headers['X-Username']) {
+            headers['X-Username'] = currentUser.username;
+        }
+
         try {
             const response = await fetch(`http://127.0.0.1:8000${endpoint}`, {
                 ...options,
                 headers
             });
-            
+
             if (response.status === 401) {
                 // Token过期，跳转登录
                 window.location.href = 'index.html';
                 return null;
             }
-            
+
             return await response.json();
         } catch (error) {
             console.error('API request error:', error);
