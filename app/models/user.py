@@ -24,8 +24,6 @@ class DBUser(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password = Column(String(128), nullable=False) 
     role = Column(SQLEnum(UserRole), nullable=False)
-    
-    # ====== 新增字段以适配前端 profile.html ======
     full_name = Column(String(50), nullable=True)
     email = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
@@ -62,7 +60,6 @@ class UserProfileResponse(BaseModel):
     class Config:
         from_attributes = True 
 
-# ====== 修改：接收前端传递的个人资料更新数据 ======
 class UserProfileUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
@@ -91,3 +88,17 @@ class SystemUptimeResponse(BaseModel):
     current_time: str
     file_path: str
     file_exists: bool
+
+class SystemSettingsRequest(BaseModel):
+    renderQuality: str
+    backupInterval: str
+    enableAnalytics: bool
+
+class SystemSettingsResponse(SystemSettingsRequest):
+    updated_at: Optional[str] = None
+
+class ApiStatsResponse(BaseModel):
+    total_calls: int
+    users_count: int
+    scenes_count: int
+    generated_at: str

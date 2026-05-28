@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from app.database import Base
@@ -53,3 +53,47 @@ class SceneResponse(BaseModel):
 
 class LLMCommandRequest(BaseModel):
     command: str
+
+class AssetItem(BaseModel):
+    id: str
+    name: str
+    icon: str
+    type: str
+
+class AssetCreateRequest(BaseModel):
+    name: str
+    type: str = "model"
+    icon: str = "fa-cube"
+
+class LayoutPoint(BaseModel):
+    x: float
+    y: float
+
+class LayoutApplyRequest(BaseModel):
+    points: List[LayoutPoint]
+
+class SketchProcessRequest(BaseModel):
+    file_name: str
+
+class SceneUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+
+class GeneratedReportResponse(BaseModel):
+    report_id: str
+    title: str
+    generated_at: str
+    download_url: str
+    summary: str
+
+class DataExportResponse(BaseModel):
+    export_id: str
+    filename: str
+    generated_at: str
+    download_url: str
+    data: Dict[str, Any]
+
+class TrendResponse(BaseModel):
+    window_days: int
+    summary: str
+    series: List[Dict[str, Any]]

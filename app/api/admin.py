@@ -11,8 +11,10 @@ from app.database import get_db
 from app.admin_logger import admin_logger, log_file
 from app.models.user import (
     DBUser, UserRole, UserProfileResponse, ROLE_CN_MAP,
-    AdminCreateUserRequest, AdminUpdateUserRequest, SystemUptimeResponse
+    AdminCreateUserRequest, AdminUpdateUserRequest, SystemUptimeResponse,
+    SystemSettingsRequest, SystemSettingsResponse, ApiStatsResponse
 )
+from app.models.scene import DBScene
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -20,6 +22,13 @@ router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 BASE_DIR = Path(__file__).parent.parent.parent  # 回到项目根目录
 UPTIME_DIR = BASE_DIR / "data"
 UPTIME_FILE = UPTIME_DIR / "system_uptime.json"
+SETTINGS_FILE = UPTIME_DIR / "system_settings.json"
+DEFAULT_SETTINGS = {
+    "renderQuality": "均衡",
+    "backupInterval": "6小时",
+    "enableAnalytics": True,
+    "updated_at": None,
+}
 
 # 确保 data 目录存在
 try:
@@ -56,6 +65,25 @@ def save_server_start_time(start_time):
         return True
     except Exception as e:
         print(f"保存启动时间失败: {e}")
+        return False
+
+def load_system_settings():
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return {**DEFAULT_SETTINGS, **json.load(f)}
+        except Exception as e:
+            print(f"读取系统配置失败: {e}")
+    return DEFAULT_SETTINGS.copy()
+
+def save_system_settings(settings):
+    try:
+        UPTIME_DIR.mkdir(exist_ok=True)
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"保存系统配置失败: {e}")
         return False
 
 # 初始化服务器启动时间
@@ -241,3 +269,42 @@ async def clear_system_logs(admin: DBUser = Depends(get_admin_user)):
             return {"message": "查无日志文件，无需清空"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清空日志失败: {str(e)}")
+
+# 10. 获取和更新系统配置 (GET/PUT /admin/users/system/settings)
+@router.get("/system/settings", response_model=SystemSettingsResponse)
+async def get_system_settings(admin: DBUser = Depends(get_admin_user)):
+    """获取系统配置，对应管理员前端的渲染质量、备份间隔和分析开关。"""
+    return load_system_settings()
+
+@router.put("/system/settings", response_model=SystemSettingsResponse)
+async def update_system_settings(
+    request: SystemSettingsRequest,
+    admin: DBUser = Depends(get_admin_user)
+):
+    """保存管理员前端的系统配置。"""
+    settings = request.model_dump()
+    settings["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if not save_system_settings(settings):
+        raise HTTPException(status_code=500, detail="保存系统配置失败")
+    admin_logger.info(f"管理员 '{admin.username}' 更新了系统配置")
+    return settings
+
+# 11. 获取 API 调用统计 (GET /admin/users/system/api-stats)
+@router.get("/system/api-stats", response_model=ApiStatsResponse)
+async def get_api_stats(
+    db: Session = Depends(get_db),
+    admin: DBUser = Depends(get_admin_user)
+):
+    """获取管理员统计卡片中的 API 调用概览。"""
+    users_count = db.query(DBUser).count()
+    scenes_count = db.query(DBScene).count()
+    log_count = 0
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            log_count = sum(1 for line in f if line.strip())
+    return ApiStatsResponse(
+        total_calls=log_count + users_count + scenes_count,
+        users_count=users_count,
+        scenes_count=scenes_count,
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
