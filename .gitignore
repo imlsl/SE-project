@@ -21,6 +21,6 @@ env/
 Thumbs.db
 
 # Logs and data files
-admin_operations.log
+admin_operations.log*
 system_uptime.json
-data/exports/*.blend
+data/exports/*
