@@ -10,13 +10,31 @@ class BlenderBridge {
         this.log('Blender 插件桥接已初始化');
     }
 
-    log(message) {
+    log(message, type = 'system') {
         if (this.outputElement) {
             const timestamp = new Date().toLocaleTimeString();
-            this.outputElement.innerHTML += `<div style="color: #a78bfa;">[${timestamp}] ${message}</div>`;
+            const colorMap = {
+                system: '#a78bfa',
+                task: '#38bdf8',
+                success: '#10b981',
+                warning: '#f59e0b',
+                error: '#f87171'
+            };
+            const color = colorMap[type] || colorMap.system;
+            const safeMessage = this.escapeHTML(message);
+            this.outputElement.innerHTML += `<div style="color: ${color};">[${timestamp}] ${safeMessage}</div>`;
             this.outputElement.scrollTop = this.outputElement.scrollHeight;
         }
         console.log('[Blender]', message);
+    }
+
+    escapeHTML(value) {
+        return String(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
     }
 
     clearLog() {
@@ -57,9 +75,11 @@ class BlenderBridge {
                     const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
-                        this.log(`任务状态: ${statusData.status}`);
+                        this.log(`任务状态: ${statusData.status}`, statusData.status === 'failed' ? 'error' : 'task');
                         if (statusData.status === 'completed') {
-                            this.log(`模板 ${templateId} 应用完成，场景已更新 (下载链接: ${statusData.download_url})`);
+                            this.log(`模板 ${templateId} 应用完成，场景已更新 (下载链接: ${statusData.download_url})`, 'success');
+                        } else if (statusData.status === 'failed') {
+                            this.log(`模板 ${templateId} 应用失败: ${statusData.error || 'Blender 任务失败'}`, 'error');
                         } else {
                             setTimeout(checkStatus, 1500);
                         }
@@ -118,9 +138,11 @@ class BlenderBridge {
                     const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
-                        this.log(`任务状态: ${statusData.status}`);
+                        this.log(`任务状态: ${statusData.status}`, statusData.status === 'failed' ? 'error' : 'task');
                         if (statusData.status === 'completed') {
-                            this.log(`AI指令执行完成，模型已生成 (下载链接: ${statusData.download_url})`);
+                            this.log(`AI指令执行完成，模型已生成 (下载链接: ${statusData.download_url})`, 'success');
+                        } else if (statusData.status === 'failed') {
+                            this.log(`AI指令执行失败: ${statusData.error || 'Blender 任务失败'}`, 'error');
                         } else {
                             setTimeout(checkStatus, 1500);
                         }
