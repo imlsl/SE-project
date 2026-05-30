@@ -3,7 +3,11 @@ class SceneModelerUI extends BaseRoleUI {
     constructor(containerId, username) {
         super(containerId, username);
         this.scenes = [];
-        this.blenderBridge = window.blenderBridge;
+        this.selectedScene = null;
+    }
+
+    get blenderBridge() {
+        return window.blenderBridge;
     }
 
     async render() {

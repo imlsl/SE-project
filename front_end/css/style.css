@@ -255,6 +255,46 @@ body {
     color: #38bdf8;
 }
 
+.small-btn.outline.active {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: #38bdf8;
+    color: #38bdf8;
+}
+
+.small-btn:disabled,
+.small-btn.outline:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.scene-asset-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0 0.35rem 0.35rem 0;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.5rem;
+    border: 1px solid #334155;
+    background: rgba(30, 41, 59, 0.65);
+    color: #cbd5e1;
+}
+
+.scene-asset-tag i {
+    color: #38bdf8;
+}
+
+.scene-asset-tag button {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0;
+}
+
+.scene-asset-tag button:hover {
+    color: #f87171;
+}
+
 .function-grid {
     display: flex;
     flex-wrap: wrap;
