@@ -87,12 +87,27 @@ backend/
 * 建模师跳转至城市场景生成系统 `/plugin/blender-generator`
 通过此设计完成鉴权与插件入口的动态路由机制。
 
-### 7. 连接 Blender 城市场景生成插件系统
+### 7. 连接 Blender 中已安装的 SCGS 插件系统
 
-在 `app/services/blender_service.py` 和 `app/api/blender.py` 中实现了连接 Blender 系统的核心接口：
+在 app/services/blender_service.py 和 app/api/blender.py 中实现了连接 Blender/SCGS 的核心接口：
 
-* 提供场景构建任务调度API，前端建模师通过下发城市参数（如 `scale`, `style` 等），触发后端的Blender插件自动运行。
-* 底层实现可通过 **headless运行Blender启动Python脚本生成**，或者**微服务/Websocket/RPC形式与常驻Blender实例通讯**完成场景建模自动化。
+* 提供 /blender/diagnostics，用于检查 Blender 是否可启动、SCGS 插件是否可启用，并列出 sna.* 相关的 apy.ops 候选算子。
+* 提供 /blender/generate、/blender/status/{task_id}、/blender/download/{task_id}，前端建模师通过下发 description、emplate_id、
+oad_type、weather、manual_vertices、manual_edges、scale、style 等参数触发 SCGS 生成。
+* 默认启用 Blender 中已安装的 SCGS 模块，并默认调用 sna.city_generation。
+* 任务状态会持久化到 data/blender_tasks.json，生成结果保存到 data/exports/。
+
+.env 中的 SCGS 配置示例：
+
+`env
+BLENDER_URL=D:/Blender/Blender Foundation/Blender 4.1/blender.exe
+BLENDER_PLUGIN_MODULE=SCGS
+BLENDER_GENERATE_OPERATOR=sna.city_generation
+BLENDER_EDIT_OPERATOR=sna.city_edit
+BLENDER_OPERATOR_FILTER=sna
+`
+
+如果你的真实 SCGS 插件模块名或算子名和默认值不同，先调用 /blender/diagnostics，根据返回的 addons 和 operators 调整上述配置。
 
 ## 安装与运行
 
