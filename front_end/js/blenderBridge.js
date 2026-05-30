@@ -1,13 +1,14 @@
-// Blender插件桥接模块 - 模拟与Blender插件的通信
+// 连接后端与 Blender 中已安装的 SCGS 插件。
 class BlenderBridge {
     constructor() {
-        this.isConnected = false;
+        this.baseUrl = 'http://127.0.0.1:8000';
         this.outputElement = null;
+        this.lastCompletedTask = null;
     }
 
     init(outputElementId) {
         this.outputElement = document.getElementById(outputElementId);
-        this.log('Blender 插件桥接已初始化');
+        this.log('SCGS 插件桥接已就绪。');
     }
 
     log(message, type = 'system') {
@@ -21,11 +22,100 @@ class BlenderBridge {
                 error: '#f87171'
             };
             const color = colorMap[type] || colorMap.system;
-            const safeMessage = this.escapeHTML(message);
-            this.outputElement.innerHTML += `<div style="color: ${color};">[${timestamp}] ${safeMessage}</div>`;
+            this.outputElement.innerHTML += `<div style="color: ${color};">[${timestamp}] ${this.escapeHTML(message)}</div>`;
             this.outputElement.scrollTop = this.outputElement.scrollHeight;
         }
         console.log('[Blender]', message);
+    }
+
+    clearLog() {
+        if (this.outputElement) this.outputElement.innerHTML = '';
+    }
+
+    async diagnostics() {
+        this.log('正在诊断 Blender/SCGS 插件...', 'task');
+        const response = await fetch(`${this.baseUrl}/blender/diagnostics`);
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || '诊断请求失败');
+        }
+        if (data.error) {
+            this.log(`诊断错误: ${data.error}`, 'error');
+        } else {
+            this.log(`诊断完成。发现算子数: ${(data.operators || []).length}`, 'success');
+        }
+        return data;
+    }
+
+    async generateScene(parameters, callbacks = {}) {
+        this.log('正在提交 SCGS 生成任务...', 'task');
+        const response = await fetch(`${this.baseUrl}/blender/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(parameters)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || '生成请求失败');
+        }
+
+        this.log(`后端已接受任务: ${data.task_id}`, 'task');
+        callbacks.onStart?.(data);
+        return this.pollTask(data.task_id, callbacks);
+    }
+
+    async pollTask(taskId, callbacks = {}) {
+        const poll = async () => {
+            const response = await fetch(`${this.baseUrl}/blender/status/${taskId}`);
+            const status = await response.json();
+            if (!response.ok) {
+                throw new Error(status.detail || 'Status request failed');
+            }
+
+            callbacks.onStatus?.(status);
+            if (status.status === 'completed') {
+                this.lastCompletedTask = status;
+                const downloadUrl = status.download_url ? `${this.baseUrl}${status.download_url}` : '';
+                this.log(`SCGS 任务完成。下载地址: ${downloadUrl || '暂无'}`, 'success');
+                callbacks.onComplete?.({ ...status, absolute_download_url: downloadUrl });
+                return status;
+            }
+
+            if (status.status === 'failed') {
+                const error = status.error || 'SCGS 任务失败';
+                this.log(error, 'error');
+                callbacks.onFailed?.(status);
+                throw new Error(error);
+            }
+
+            this.log(`任务状态: ${status.status}`, 'task');
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            return poll();
+        };
+        return poll();
+    }
+
+    async applyTemplate(templateId, extra = {}, callbacks = {}) {
+        return this.generateScene({ ...extra, template_id: templateId }, callbacks);
+    }
+
+    async processLLMCommand(command, extra = {}, callbacks = {}) {
+        return this.generateScene({ ...extra, description: command, instruction: command }, callbacks);
+    }
+
+    addAsset(assetType, assetName) {
+        this.log(`资产 "${assetName || assetType}" 已暂存为前端演示项。若要真实同步，需要 SCGS 插件提供资产接口。`, 'warning');
+        return true;
+    }
+
+    async applyLayout(layoutData) {
+        this.log(`布局已作为前后端演示数据暂存: ${JSON.stringify(layoutData)}`, 'warning');
+        return true;
+    }
+
+    async processSketch(fileName) {
+        this.log(`草图 "${fileName}" 已通过演示接口处理。真实提取需要 SCGS 插件提供接口。`, 'warning');
+        return true;
     }
 
     escapeHTML(value) {
@@ -36,136 +126,6 @@ class BlenderBridge {
             .replaceAll('"', '&quot;')
             .replaceAll("'", '&#39;');
     }
-
-    clearLog() {
-        if (this.outputElement) {
-            this.outputElement.innerHTML = '';
-        }
-    }
-
-    addAsset(assetType, assetName) {
-        this.log(`添加资产: ${assetName || assetType}`);
-        this.log(`同步到Blender场景...`);
-        // 模拟异步操作
-        setTimeout(() => {
-            this.log(`资产 "${assetName || assetType}" 已成功添加到3D场景`);
-        }, 500);
-        return true;
-    }
-
-    async applyTemplate(templateId) {
-        this.log(`应用模板: ${templateId}`);
-        this.log(`联系后端生成城市布局...`);
-        try {
-            const response = await fetch('http://127.0.0.1:8000/blender/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    city_name: templateId, 
-                    scale: 1.0, 
-                    style: 'default'
-                })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                this.log(`后端已接受任务，Task ID: ${data.task_id}`);
-                
-                // 轮询检查任务状态
-                const checkStatus = async () => {
-                    const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        this.log(`任务状态: ${statusData.status}`, statusData.status === 'failed' ? 'error' : 'task');
-                        if (statusData.status === 'completed') {
-                            this.log(`模板 ${templateId} 应用完成，场景已更新 (下载链接: ${statusData.download_url})`, 'success');
-                        } else if (statusData.status === 'failed') {
-                            this.log(`模板 ${templateId} 应用失败: ${statusData.error || 'Blender 任务失败'}`, 'error');
-                        } else {
-                            setTimeout(checkStatus, 1500);
-                        }
-                    }
-                };
-                setTimeout(checkStatus, 1000);
-            } else {
-                this.log(`发生错误: 请求后端失败`);
-            }
-        } catch (e) {
-            this.log(`后端网络错误, 使用降级逻辑...`);
-            setTimeout(() => {
-                this.log(`模板 ${templateId} 降级应用完成，场景已更新`);
-            }, 800);
-        }
-        return true;
-    }
-
-    async applyLayout(layoutData) {
-        this.log(`应用布局: ${JSON.stringify(layoutData)}`);
-        this.log('生成道路/节点并同步到场景...');
-        // 模拟后端处理
-        setTimeout(() => {
-            this.log('布局应用完成，场景道路与节点已更新');
-        }, 800);
-        return true;
-    }
-
-    async processSketch(fileName) {
-        this.log(`处理草图文件: ${fileName}`);
-        this.log('尝试从草图中提取点集与道路线...');
-        // 模拟提取结果
-        setTimeout(() => {
-            const points = [{x:10,y:20},{x:50,y:80},{x:120,y:60}];
-            this.log(`草图提取完成: 点集(${points.length})，已应用到布局`);
-        }, 1000);
-        return true;
-    }
-
-    async processLLMCommand(command) {
-        this.log(`LLM指令: "${command}"`);
-        this.log(`联系后端发送AI生成指令...`);
-        try {
-            const response = await fetch('http://127.0.0.1:8000/blender/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    instruction: command
-                })
-            });
-            if (response.ok) {
-                const data = await response.json();
-                this.log(`后端已接受AI生成任务，Task ID: ${data.task_id}`);
-                
-                const checkStatus = async () => {
-                    const statusRes = await fetch(`http://127.0.0.1:8000/blender/status/${data.task_id}`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        this.log(`任务状态: ${statusData.status}`, statusData.status === 'failed' ? 'error' : 'task');
-                        if (statusData.status === 'completed') {
-                            this.log(`AI指令执行完成，模型已生成 (下载链接: ${statusData.download_url})`, 'success');
-                        } else if (statusData.status === 'failed') {
-                            this.log(`AI指令执行失败: ${statusData.error || 'Blender 任务失败'}`, 'error');
-                        } else {
-                            setTimeout(checkStatus, 1500);
-                        }
-                    }
-                };
-                setTimeout(checkStatus, 1000);
-            } else {
-                this.log(`发生错误: 请求后端失败`);
-            }
-        } catch (e) {
-            this.log(`后端网络错误, 无法执行指令: ${e}`);
-        }
-        return true;
-    }
-
-    showPanel() {
-        const panel = document.getElementById('blenderSimulatePanel');
-        if (panel) {
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            this.log('插件面板已' + (panel.style.display === 'block' ? '打开' : '关闭'));
-        }
-    }
 }
 
-// 全局单例
 window.blenderBridge = new BlenderBridge();
