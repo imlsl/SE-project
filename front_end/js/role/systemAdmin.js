@@ -14,6 +14,7 @@ class SystemAdminUI extends BaseRoleUI {
             backupInterval: '6小时',
             enableAnalytics: true
         };
+        this.apiStats = null;
         this.autoRefreshInterval = null;
         this.uptimeRefreshInterval = null;
     }
@@ -142,6 +143,8 @@ class SystemAdminUI extends BaseRoleUI {
     async loadData() {
         await this.loadUsers();
         await this.loadSystemLogs();
+        await this.loadSystemSettings();
+        await this.loadApiStats();
     }
 
     async loadUsers() {
@@ -193,6 +196,41 @@ class SystemAdminUI extends BaseRoleUI {
         }
     }
 
+    async loadSystemSettings() {
+        try {
+            const response = await this.apiRequest('/admin/users/system/settings', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response && !response.detail) {
+                this.systemSettings = response;
+            }
+        } catch (error) {
+            console.error('加载系统配置失败:', error);
+        }
+    }
+
+    async loadApiStats() {
+        try {
+            const response = await this.apiRequest('/admin/users/system/api-stats', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response && !response.detail) {
+                this.apiStats = response;
+                this.updateStatsCard();
+            }
+        } catch (error) {
+            console.error('加载 API 统计失败:', error);
+        }
+    }
+
     async loadSystemLogs() {
         try {
             const response = await this.apiRequest('/admin/users/system/logs', {
@@ -240,11 +278,12 @@ class SystemAdminUI extends BaseRoleUI {
         const statsGrid = document.getElementById('statsGrid');
         if (statsGrid) {
             const uptimeDisplay = this.formatUptime(this.systemUptime.uptime_days);
+            const apiTotal = this.apiStats?.total_calls ? `${this.apiStats.total_calls}` : '0';
             statsGrid.innerHTML = `
                 ${this.createStatCard('注册用户', this.users.length, 'fas fa-users', '#38bdf8')}
                 ${this.createStatCard('在线用户', this.getOnlineCount(), 'fas fa-user-check', '#10b981')}
                 ${this.createStatCard('系统运行', uptimeDisplay, 'fas fa-clock', '#a78bfa')}
-                ${this.createStatCard('API调用', '12.4k', 'fas fa-chart-line', '#f59e0b')}
+                ${this.createStatCard('API调用', apiTotal, 'fas fa-chart-line', '#f59e0b')}
             `;
         }
     }
@@ -356,20 +395,41 @@ class SystemAdminUI extends BaseRoleUI {
         
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         if (saveConfigBtn) {
-            saveConfigBtn.addEventListener('click', () => {
+            saveConfigBtn.addEventListener('click', async () => {
                 const renderQuality = document.getElementById('renderQuality').value;
                 const backupInterval = document.getElementById('backupInterval').value;
                 const enableAnalytics = document.getElementById('enableAnalytics').checked;
-                
-                this.systemSettings = { renderQuality, backupInterval, enableAnalytics };
+
+                await this.saveSystemSettings({ renderQuality, backupInterval, enableAnalytics });
+            });
+        }
+    }
+
+    async saveSystemSettings(payload) {
+        try {
+            const response = await this.apiRequest('/admin/users/system/settings', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response && !response.detail) {
+                this.systemSettings = response;
                 this.showMessage('配置已保存', 'info');
-                
                 this.systemLogs.unshift(`系统配置已更新 - ${new Date().toLocaleString()}`);
                 const logContainer = document.getElementById('logContainer');
                 if (logContainer && this.systemLogs.length > 0) {
                     logContainer.innerHTML = this.systemLogs.map(log => `<div style="padding: 0.25rem 0; border-bottom: 1px solid #1e293b;">> ${log}</div>`).join('');
                 }
-            });
+            } else if (response && response.detail) {
+                this.showMessage(response.detail, 'error');
+            }
+        } catch (error) {
+            console.error('保存系统配置失败:', error);
+            this.showMessage('保存系统配置失败', 'error');
         }
     }
 

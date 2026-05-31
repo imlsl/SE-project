@@ -5,9 +5,9 @@ class SceneEditorUI extends BaseRoleUI {
         this.scene = null;
         this.editAssets = [];
         this.activeTab = 'generate';
-        this.sketchPreviewUrl = '';
         this.blenderBridge = window.blenderBridge;
         this.lastDownloadUrl = '';
+        this.availableAssets = [];
         this.templatePresets = [
             { id: '0', name: '现代模板', detail: '由 SCGS 插件解释模板 ID 0' },
             { id: '1', name: '古典模板', detail: '由 SCGS 插件解释模板 ID 1' },
@@ -42,6 +42,7 @@ class SceneEditorUI extends BaseRoleUI {
         this.switchEditTab(this.activeTab);
         this.renderEditAssets();
         this.blenderBridge?.init('simulateOutput');
+        this.loadAvailableAssets();
     }
 
     render() {
@@ -76,12 +77,11 @@ class SceneEditorUI extends BaseRoleUI {
 
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">生成</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">生成</button>                        
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="layout">道路布局</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="assets">资产</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="layout">布局</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="sketch">草图</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="render">渲染</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
                     </div>
 
                     <div id="editTab_generate" style="margin-top: 0.9rem;">
@@ -142,6 +142,22 @@ class SceneEditorUI extends BaseRoleUI {
                         <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">生成任务会调用 Blender 中已安装的 SCGS 插件，仓库样例仅作为参考。</div>
                     </div>
 
+                    <div id="editTab_layout" style="margin-top: 0.9rem; display: none;">
+                        <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
+                            道路布局类型
+                            <select id="roadLayoutType" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                <option value="1">1 经典网格布局</option>
+                                <option value="2" selected>2 扩展网格布局</option>
+                                <option value="3">3 图像识别提取</option>
+                                <option value="4">4 手动布局</option>
+                            </select>
+                        </label>
+                        <div id="layoutImageUpload" style="margin-top: 0.6rem; display: none;">
+                            <input type="file" id="layoutImageInput" accept="image/*" />
+                            <div id="layoutImageMeta" style="margin-top: 0.4rem; font-size: 0.75rem; color: #94a3b8;">请选择图片用于图像识别提取。</div>
+                        </div>
+                    </div>
+
                     <div id="editTab_diagnostics" style="margin-top: 0.9rem; display: none;">
                         <div id="diagnosticsSummary" style="font-size: 0.78rem; color: #94a3b8;">点击“插件诊断”检查 Blender 路径、SCGS 启用状态和 sna 候选算子。</div>
                         <pre id="diagnosticsOutput" style="margin-top: 0.75rem; max-height: 260px; overflow: auto; white-space: pre-wrap; background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; color: #cbd5e1;"></pre>
@@ -152,23 +168,10 @@ class SceneEditorUI extends BaseRoleUI {
                             <input id="editAssetSearch" placeholder="输入资产名称" style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                             <button class="small-btn outline" id="editAssetAddBtn">添加</button>
                         </div>
-                        <div style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">资产库暂保留演示能力，真实同步需要 SCGS 插件暴露资产 API。</div>
+                        <div id="editAssetCatalog" style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">资产库加载中...</div>
                         <div id="editAssetList" style="margin-top: 0.6rem; font-size: 0.75rem; color: #94a3b8;"></div>
                     </div>
 
-                    <div id="editTab_layout" style="margin-top: 0.9rem; display: none;">
-                        <textarea id="editLayoutInput" placeholder="布局点集: x1,y1;x2,y2;..." style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; height: 72px;"></textarea>
-                        <div id="layoutFeedback" style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">示例：0,20;50,80;120,60</div>
-                        <div style="margin-top: 0.5rem;"><button class="small-btn outline" id="editApplyLayoutBtn">应用布局演示</button></div>
-                    </div>
-
-                    <div id="editTab_sketch" style="margin-top: 0.9rem; display: none;">
-                        <input type="file" id="editSketchUpload" accept="image/*" />
-                        <button class="small-btn outline" id="editProcessSketchBtn" style="margin-left: 0.5rem;">处理草图演示</button>
-                        <div id="sketchMeta" style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">请选择草图图片后处理。</div>
-                        <div id="sketchPreview" style="display: none; margin-top: 0.6rem;"></div>
-                        <div id="sketchResult" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;"></div>
-                    </div>
 
                     <div id="editTab_render" style="margin-top: 0.9rem; display: none;">
                         <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -223,10 +226,13 @@ class SceneEditorUI extends BaseRoleUI {
         });
         document.getElementById('editAssetList')?.addEventListener('click', e => this.removeAssetFromClick(e));
 
-        document.getElementById('editLayoutInput')?.addEventListener('input', () => this.updateLayoutFeedback());
-        document.getElementById('editApplyLayoutBtn')?.addEventListener('click', () => this.applyLayout());
-        document.getElementById('editSketchUpload')?.addEventListener('change', event => this.updateSketchPreview(event));
-        document.getElementById('editProcessSketchBtn')?.addEventListener('click', () => this.processSketch());
+        document.getElementById('roadLayoutType')?.addEventListener('change', e => this.handleLayoutTypeChange(e));
+        document.getElementById('layoutImageInput')?.addEventListener('change', e => this.handleLayoutImageChange(e));
+        const layoutSelect = document.getElementById('roadLayoutType');
+        if (layoutSelect) {
+            this.handleLayoutTypeChange({ target: layoutSelect });
+        }
+
         document.getElementById('renderSceneBtn')?.addEventListener('click', () => this.startRender());
         document.getElementById('renderDownloadBtn')?.addEventListener('click', () => this.downloadRenderPreview());
 
@@ -240,6 +246,27 @@ class SceneEditorUI extends BaseRoleUI {
             new AuthManager().logout();
             window.location.href = 'index.html';
         });
+    }
+
+    handleLayoutTypeChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        const upload = document.getElementById('layoutImageUpload');
+        if (!upload) return;
+        upload.style.display = target.value === '3' ? 'block' : 'none';
+    }
+
+    handleLayoutImageChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        const meta = document.getElementById('layoutImageMeta');
+        const file = target.files?.[0];
+        if (!meta) return;
+        if (!file) {
+            meta.textContent = '请选择图片用于图像识别提取。';
+            return;
+        }
+        meta.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
     }
 
     collectGenerationParams() {
@@ -399,6 +426,13 @@ class SceneEditorUI extends BaseRoleUI {
             this.showMessage('请输入资产名称', 'error');
             return;
         }
+        if (this.availableAssets.length > 0) {
+            const match = this.availableAssets.find(asset => asset.name.toLowerCase() === name.toLowerCase());
+            if (!match) {
+                this.showMessage('资产库中未找到该资产', 'error');
+                return;
+            }
+        }
         if (this.editAssets.some(asset => asset.toLowerCase() === name.toLowerCase())) {
             this.showMessage('该资产已添加', 'error');
             return;
@@ -420,77 +454,6 @@ class SceneEditorUI extends BaseRoleUI {
         this.renderEditAssets();
     }
 
-    async applyLayout() {
-        const raw = document.getElementById('editLayoutInput')?.value.trim();
-        const parsed = this.parseLayoutPoints(raw);
-        if (!parsed.valid) {
-            this.setLayoutFeedback(parsed.message, 'error');
-            this.showMessage(parsed.message, 'error');
-            return;
-        }
-        const response = await this.apiRequest('/modeler/layout/apply', {
-            method: 'POST',
-            body: JSON.stringify({ points: parsed.points })
-        });
-        if (response && !response.detail) {
-            await this.blenderBridge?.applyLayout({ points: parsed.points });
-            this.setLayoutFeedback(`应用成功：${parsed.points.length} 个点，${response.road_count ?? parsed.points.length - 1} 条道路。`, 'success');
-        }
-    }
-
-    updateLayoutFeedback() {
-        const raw = document.getElementById('editLayoutInput')?.value.trim();
-        if (!raw) {
-            this.setLayoutFeedback('示例：0,20;50,80;120,60', 'muted');
-            return;
-        }
-        const parsed = this.parseLayoutPoints(raw);
-        this.setLayoutFeedback(parsed.valid ? `已识别 ${parsed.points.length} 个点。` : parsed.message, parsed.valid ? 'task' : 'error');
-    }
-
-    updateSketchPreview(event) {
-        const file = event.target.files?.[0];
-        const meta = document.getElementById('sketchMeta');
-        const preview = document.getElementById('sketchPreview');
-        const result = document.getElementById('sketchResult');
-        if (this.sketchPreviewUrl) URL.revokeObjectURL(this.sketchPreviewUrl);
-        if (!file) {
-            if (meta) meta.textContent = '请选择草图图片后处理。';
-            if (preview) {
-                preview.style.display = 'none';
-                preview.innerHTML = '';
-            }
-            if (result) result.textContent = '';
-            return;
-        }
-        this.sketchPreviewUrl = URL.createObjectURL(file);
-        if (meta) meta.textContent = `${file.name} - ${this.formatFileSize(file.size)}`;
-        if (preview) {
-            preview.style.display = 'block';
-            preview.innerHTML = `<img src="${this.sketchPreviewUrl}" alt="草图预览" style="max-width: 220px; max-height: 140px; border-radius: 0.5rem; border: 1px solid #334155; object-fit: cover;">`;
-        }
-        if (result) result.textContent = '草图已选择，可以开始处理。';
-    }
-
-    async processSketch() {
-        const file = document.getElementById('editSketchUpload')?.files?.[0];
-        const result = document.getElementById('sketchResult');
-        if (!file) {
-            this.showMessage('请先选择草图文件', 'error');
-            return;
-        }
-        const response = await this.apiRequest('/modeler/sketch/process', {
-            method: 'POST',
-            body: JSON.stringify({ file_name: file.name })
-        });
-        if (response && !response.detail) {
-            await this.blenderBridge?.processSketch(file.name);
-            if (result) {
-                result.textContent = `处理完成：提取 ${response.points?.length || 0} 个点，${response.road_count || 0} 条道路。`;
-                result.style.color = '#10b981';
-            }
-        }
-    }
 
     startRender() {
         const button = document.getElementById('renderSceneBtn');
@@ -553,7 +516,7 @@ class SceneEditorUI extends BaseRoleUI {
 
     switchEditTab(tab) {
         this.activeTab = tab;
-        ['generate', 'diagnostics', 'assets', 'layout', 'sketch', 'render'].forEach(key => {
+        ['generate', 'layout', 'diagnostics', 'assets', 'render'].forEach(key => {
             const panel = document.getElementById(`editTab_${key}`);
             if (panel) panel.style.display = key === tab ? 'block' : 'none';
         });
@@ -578,27 +541,34 @@ class SceneEditorUI extends BaseRoleUI {
         )).join('');
     }
 
-    parseLayoutPoints(raw) {
-        if (!raw) return { valid: false, points: [], message: '请填写布局点集' };
-        const chunks = raw.split(';').map(part => part.trim()).filter(Boolean);
-        if (chunks.length < 2) {
-            return { valid: false, points: [], message: '至少需要 2 个点，例如：10,20;50,80' };
-        }
-        const points = [];
-        for (const chunk of chunks) {
-            const parts = chunk.split(',').map(part => part.trim());
-            if (parts.length !== 2) {
-                return { valid: false, points: [], message: `格式错误：${chunk} 应为 x,y` };
+    async loadAvailableAssets() {
+        const catalog = document.getElementById('editAssetCatalog');
+        if (catalog) catalog.textContent = '资产库加载中...';
+        try {
+            const response = await this.apiRequest('/modeler/assets', { method: 'GET' });
+            if (response && !response.detail) {
+                this.availableAssets = response;
+                if (catalog) {
+                    if (this.availableAssets.length === 0) {
+                        catalog.textContent = '资产库为空，可在建模师页面新增资产。';
+                        return;
+                    }
+                    catalog.innerHTML = this.availableAssets.map(asset => (
+                        `<span class="scene-asset-tag" style="margin-right: 0.35rem;">
+                            <i class="fas ${asset.icon || 'fa-cube'}"></i>
+                            ${this.escapeHTML(asset.name)}
+                        </span>`
+                    )).join('');
+                }
+            } else if (catalog) {
+                catalog.textContent = response?.detail || '资产库加载失败';
             }
-            const x = Number(parts[0]);
-            const y = Number(parts[1]);
-            if (!Number.isFinite(x) || !Number.isFinite(y)) {
-                return { valid: false, points: [], message: `坐标必须是数字：${chunk}` };
-            }
-            points.push({ x, y });
+        } catch (error) {
+            console.error('加载资产库失败:', error);
+            if (catalog) catalog.textContent = '资产库加载失败';
         }
-        return { valid: true, points, message: '' };
     }
+
 
     formatTaskStatus(task) {
         const warningText = task.warnings?.length ? ` Warnings: ${task.warnings.join('; ')}` : '';
@@ -612,12 +582,6 @@ class SceneEditorUI extends BaseRoleUI {
         status.style.color = this.feedbackColor(type);
     }
 
-    setLayoutFeedback(message, type = 'muted') {
-        const feedback = document.getElementById('layoutFeedback');
-        if (!feedback) return;
-        feedback.textContent = message;
-        feedback.style.color = this.feedbackColor(type);
-    }
 
     setSceneSaveStatus(message, type = 'success') {
         const status = document.getElementById('sceneSaveStatus');
@@ -667,12 +631,6 @@ class SceneEditorUI extends BaseRoleUI {
             balanced: '均衡质量',
             high: '高质量'
         }[value] || value;
-    }
-
-    formatFileSize(bytes) {
-        if (!bytes) return '0 KB';
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     }
 
     escapeHTML(value) {
