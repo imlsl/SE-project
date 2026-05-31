@@ -155,6 +155,20 @@ class SceneEditorUI extends BaseRoleUI {
                         <div id="layoutImageUpload" style="margin-top: 0.6rem; display: none;">
                             <input type="file" id="layoutImageInput" accept="image/*" />
                             <div id="layoutImageMeta" style="margin-top: 0.4rem; font-size: 0.75rem; color: #94a3b8;">请选择图片用于图像识别提取。</div>
+                            <button class="small-btn outline" id="layoutExtractBtn" style="margin-top: 0.5rem;">提取</button>
+                        </div>
+                        <div id="layoutManualInputs" style="margin-top: 0.6rem; display: none;">
+                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
+                                手动顶点
+                                <textarea id="layoutManualVertices" placeholder="逗号分隔的三维坐标，如 (0,0,0),(50,0,0),(50,50,0),(0,50,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
+                            </label>
+                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; margin-top: 0.5rem;">
+                                手动边
+                                <textarea id="layoutManualEdges" placeholder="逗号分隔的索引对，如 (0,1),(1,2),(2,3),(3,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
+                            </label>
+                            <div style="margin-top: 0.5rem;">
+                                <button class="small-btn" id="layoutManualGenerateBtn">生成</button>
+                            </div>
                         </div>
                     </div>
 
@@ -228,6 +242,8 @@ class SceneEditorUI extends BaseRoleUI {
 
         document.getElementById('roadLayoutType')?.addEventListener('change', e => this.handleLayoutTypeChange(e));
         document.getElementById('layoutImageInput')?.addEventListener('change', e => this.handleLayoutImageChange(e));
+        document.getElementById('layoutExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
+        document.getElementById('layoutManualGenerateBtn')?.addEventListener('click', () => this.generateManualLayout());
         const layoutSelect = document.getElementById('roadLayoutType');
         if (layoutSelect) {
             this.handleLayoutTypeChange({ target: layoutSelect });
@@ -252,8 +268,12 @@ class SceneEditorUI extends BaseRoleUI {
         const target = event.target;
         if (!(target instanceof HTMLSelectElement)) return;
         const upload = document.getElementById('layoutImageUpload');
+        const manualInputs = document.getElementById('layoutManualInputs');
         if (!upload) return;
         upload.style.display = target.value === '3' ? 'block' : 'none';
+        if (manualInputs) {
+            manualInputs.style.display = target.value === '3' || target.value === '4' ? 'block' : 'none';
+        }
     }
 
     handleLayoutImageChange(event) {
@@ -267,6 +287,35 @@ class SceneEditorUI extends BaseRoleUI {
             return;
         }
         meta.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    }
+
+    extractLayoutFromImage() {
+        const file = document.getElementById('layoutImageInput')?.files?.[0];
+        if (!file) {
+            this.showMessage('请先选择图片', 'error');
+            return;
+        }
+        const verticesInput = document.getElementById('layoutManualVertices');
+        const edgesInput = document.getElementById('layoutManualEdges');
+        if (!verticesInput || !edgesInput) return;
+
+        verticesInput.value = '(0,0,0),(50,0,0),(50,50,0),(0,50,0)';
+        edgesInput.value = '(0,1),(1,2),(2,3),(3,0)';
+        this.showMessage('已根据图片提取道路布局（演示）', 'info');
+    }
+
+    generateManualLayout() {
+        const verticesInput = document.getElementById('layoutManualVertices');
+        const edgesInput = document.getElementById('layoutManualEdges');
+        if (!verticesInput || !edgesInput) return;
+        const vertices = verticesInput.value.trim();
+        const edges = edgesInput.value.trim();
+        if (!vertices || !edges) {
+            this.showMessage('请填写手动顶点和手动边', 'error');
+            return;
+        }
+        this.logEditAction(`手动布局已提交: vertices=${vertices}; edges=${edges}`, 'task');
+        this.showMessage('手动布局已生成（待接后续处理）', 'info');
     }
 
     collectGenerationParams() {
