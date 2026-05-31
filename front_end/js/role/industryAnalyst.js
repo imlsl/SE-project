@@ -197,25 +197,66 @@ class IndustryAnalystUI extends BaseRoleUI {
 
         const exportDataBtn = document.getElementById('exportDataBtn');
         if (exportDataBtn) {
-            exportDataBtn.addEventListener('click', () => {
-                this.showMessage('数据导出功能开发中', 'info');
+            exportDataBtn.addEventListener('click', async () => {
+                this.showMessage('数据导出中...', 'info');
+                try {
+                    const response = await this.apiRequest('/analyst/data/export', {
+                        method: 'GET',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && !response.detail) {
+                        const preview = document.getElementById('reportPreview');
+                        if (preview) {
+                            preview.style.display = 'block';
+                            preview.innerHTML = `
+                                <div style="font-size: 0.85rem; color: #e2e8f0;">导出文件：${response.filename}</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">生成时间：${response.generated_at}</div>
+                                <a class="small-btn outline" style="margin-top: 0.5rem; display: inline-flex; text-decoration: none;" href="http://127.0.0.1:8000${response.download_url}" target="_blank">
+                                    <i class="fas fa-download"></i> 下载数据
+                                </a>
+                            `;
+                        }
+                        this.showMessage('数据导出已准备', 'info');
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
+                    }
+                } catch (error) {
+                    console.error('数据导出失败:', error);
+                    this.showMessage('数据导出失败', 'error');
+                }
             });
         }
 
         const viewTrendBtn = document.getElementById('viewTrendBtn');
         if (viewTrendBtn) {
-            viewTrendBtn.addEventListener('click', () => {
+            viewTrendBtn.addEventListener('click', async () => {
                 const preview = document.getElementById('reportPreview');
-                if (preview) {
-                    preview.style.display = preview.style.display === 'none' ? 'block' : 'none';
-                    if (preview.style.display === 'block') {
+                if (!preview) return;
+                try {
+                    const response = await this.apiRequest('/analyst/trends?days=30', {
+                        method: 'GET',
+                        headers: {
+                            'X-Username': this.username
+                        }
+                    });
+
+                    if (response && !response.detail) {
+                        preview.style.display = 'block';
                         preview.innerHTML = `
-                            <div style="text-align: center;">
-                                <i class="fas fa-chart-line" style="font-size: 2rem; color: #38bdf8;"></i>
-                                <p style="margin-top: 0.5rem;">近30天行业趋势分析显示，智慧交通领域增长显著，环比提升12.5%</p>
+                            <div style="font-size: 0.85rem; color: #e2e8f0;">${response.summary}</div>
+                            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">
+                                ${response.series.map(item => `${item.label}: ${item.value} (${item.change}%)`).join(' | ')}
                             </div>
                         `;
+                    } else if (response && response.detail) {
+                        this.showMessage(response.detail, 'error');
                     }
+                } catch (error) {
+                    console.error('趋势数据加载失败:', error);
+                    this.showMessage('趋势数据加载失败', 'error');
                 }
             });
         }
