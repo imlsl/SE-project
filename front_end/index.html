@@ -1,69 +1,268 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>智能城市生成系统 | 登录</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <title>智能城市生成系统 | 智慧未来</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-<div class="bg-glow"></div>
-<div class="bg-glow bg-glow-left"></div>
 
-<div class="app-container" id="appRoot">
-    <div id="authView">
-        <div class="auth-wrapper">
-            <div class="glass-card auth-card">
+<body>
+    <!-- 顶部导航栏 -->
+    <div class="topbar">
+        <div class="topbar-container">
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <i class="fas fa-city"></i>
+                </div>
+                <div class="logo-text">SmartCity Generator</div>
+            </div>
+            <div class="nav-links">
+                <a href="#">首页</a>
+                <a href="#">关于我们</a>
+                <button class="login-btn-header" id="headerLoginBtn">
+                    <i class="fas fa-user"></i> 登录
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容区域 -->
+    <div class="main-content">
+        <div class="content-container">
+            <!-- 轮播图区域 -->
+            <div class="carousel-section">
+                <div class="section-title">
+                    <i class="fas fa-images"></i>
+                    <span>智慧城市</span>
+                </div>
+                <div class="carousel-container">
+                    <div class="carousel">
+                        <div class="carousel-inner" id="carouselInner">
+                            <!-- 轮播图片将通过JS动态生成 -->
+                        </div>
+                        <div class="carousel-btn prev" id="prevBtn">
+                            <i class="fas fa-chevron-left"></i>
+                        </div>
+                        <div class="carousel-btn next" id="nextBtn">
+                            <i class="fas fa-chevron-right"></i>
+                        </div>
+                        <div class="carousel-indicators" id="indicators"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 功能卡片区域 -->
+            <div class="features-section">
+                <div class="section-title">
+                    <i class="fas fa-star-of-life"></i>
+                    <span>核心功能</span>
+                </div>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-cube"></i>
+                        </div>
+                        <h3>资产扩充</h3>
+                        <p>2D纹理 / 3D资产动态添加与替换</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <h3>模板生成</h3>
+                        <p>一键配置树木、道路纹理及座椅</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-car-side"></i>
+                        </div>
+                        <h3>动态仿真</h3>
+                        <p>车流·人群·地形·湖泊船只</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-comment-dots"></i>
+                        </div>
+                        <h3>自然语言</h3>
+                        <p>LLM文字指令调整天色/天气</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <div class="footer">
+        <p>&copy; 2026 SmartCity Generator. All rights reserved. | 智能城市，智慧未来</p>
+    </div>
+
+    <!-- 登录模态框 -->
+    <div id="loginModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="glass-card auth-card" style="position: relative;">
+                <div style="position: absolute; top: 1rem; right: 1rem;">
+                    <button id="closeModalBtn"
+                        style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 1.2rem;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
                 <div class="hero-icon">
                     <i class="fas fa-city"></i>
                 </div>
                 <div class="logo">SmartCity Generator</div>
                 <div class="tagline">智能城市生成系统</div>
                 <div id="authTabs" style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
-                    <button class="btn-outline" style="flex:1;" id="loginTabBtn">登录</button>
-                    <button class="btn-outline" style="flex:1;" id="registerTabBtn">注册</button>
+                    <button class="btn-outline active" style="flex:1;" id="modalLoginTabBtn">登录</button>
+                    <button class="btn-outline" style="flex:1;" id="modalRegisterTabBtn">注册</button>
                 </div>
-                <div id="loginForm">
+                <div id="modalLoginForm">
                     <div class="input-group">
                         <label>用户名</label>
-                        <div class="input-with-icon"><i class="fas fa-user"></i><input type="text" id="loginUsername" placeholder="请输入用户名"></div>
+                        <div class="input-with-icon"><i class="fas fa-user"></i><input type="text"
+                                id="modalLoginUsername" placeholder="请输入用户名"></div>
                     </div>
                     <div class="input-group">
                         <label>密码</label>
-                        <div class="input-with-icon"><i class="fas fa-lock"></i><input type="password" id="loginPassword" placeholder="密码"></div>
+                        <div class="input-with-icon"><i class="fas fa-lock"></i><input type="password"
+                                id="modalLoginPassword" placeholder="密码"></div>
                     </div>
-                    <button class="btn" id="doLoginBtn">登录系统</button>
-                    <div class="switch-text">没有账号？ <span id="toRegisterBtn">立即注册</span></div>
+                    <button class="btn" id="modalDoLoginBtn">登录系统</button>
                 </div>
-                <div id="registerForm" style="display:none;">
+                <div id="modalRegisterForm" style="display:none;">
                     <div class="input-group">
                         <label>用户名</label>
-                        <div class="input-with-icon"><i class="fas fa-user-plus"></i><input type="text" id="regUsername" placeholder="3~20个字符"></div>
+                        <div class="input-with-icon"><i class="fas fa-user-plus"></i><input type="text"
+                                id="modalRegUsername" placeholder="3~20个字符"></div>
                     </div>
                     <div class="input-group">
                         <label>密码</label>
-                        <div class="input-with-icon"><i class="fas fa-key"></i><input type="password" id="regPassword" placeholder="至少6位"></div>
+                        <div class="input-with-icon"><i class="fas fa-key"></i><input type="password"
+                                id="modalRegPassword" placeholder="至少6位"></div>
                     </div>
                     <div class="input-group">
                         <label>选择角色</label>
-                        <select id="regRole">
+                        <select id="modalRegRole">
                             <option value="industry_analyst">行业分析师</option>
                             <option value="scene_modeler">场景建模师</option>
                         </select>
                     </div>
-                    <button class="btn" id="doRegisterBtn">注册新账号</button>
-                    <div class="switch-text">已有账号？ <span id="toLoginBtn">立即登录</span></div>
+                    <button class="btn" id="modalDoRegisterBtn">注册新账号</button>
                 </div>
-                <div id="authMessage" style="margin-top: 1rem; font-size: 0.85rem; color: #f97316;"></div>
+                <div id="modalAuthMessage"
+                    style="margin-top: 1rem; font-size: 0.85rem; color: #f97316; text-align: center;"></div>
             </div>
         </div>
     </div>
-</div>
 
-<script src="js/auth.js"></script>
-<script src="js/common.js"></script>
-<script src="js/app.js"></script>
+    <!-- JS 文件 -->
+    <script src="js/auth.js"></script>
+    <script src="js/common.js"></script>
+    <script src="js/app.js"></script>
+    
+    <!-- 仅轮播图相关的脚本 -->
+    <script>
+        // 轮播图数据
+        const carouselImages = [
+            { url: "image/image1.png"},
+            { url: "image/image2.png"},
+            { url: "image/image3.png"},
+            { url: "image/image4.png"}
+        ];
+
+        let currentIndex = 0;
+        let autoPlayInterval;
+        const carouselInner = document.getElementById('carouselInner');
+        const indicators = document.getElementById('indicators');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+
+        function initCarousel() {
+            if (!carouselInner) return;
+            
+            carouselImages.forEach((image, index) => {
+                const carouselItem = document.createElement('div');
+                carouselItem.className = `carousel-item ${index === 0 ? 'active' : ''}`;
+                carouselItem.style.backgroundImage = `url(${image.url})`;
+                carouselItem.style.backgroundSize = 'cover';
+                carouselItem.style.backgroundPosition = 'center';
+                carouselItem.style.backgroundBlendMode = 'normal';
+                carouselItem.innerHTML = '';
+                carouselInner.appendChild(carouselItem);
+
+                const indicator = document.createElement('div');
+                indicator.className = `indicator ${index === 0 ? 'active' : ''}`;
+                indicator.addEventListener('click', () => goToSlide(index));
+                indicators.appendChild(indicator);
+            });
+        }
+
+        function goToSlide(index) {
+            const items = document.querySelectorAll('.carousel-item');
+            const dots = document.querySelectorAll('.indicator');
+            if (!items.length) return;
+            
+            if (index < 0) index = items.length - 1;
+            if (index >= items.length) index = 0;
+            items.forEach(item => item.classList.remove('active'));
+            dots.forEach(dot => dot.classList.remove('active'));
+            items[index].classList.add('active');
+            dots[index].classList.add('active');
+            currentIndex = index;
+        }
+
+        function nextSlide() { goToSlide(currentIndex + 1); }
+        function prevSlide() { goToSlide(currentIndex - 1); }
+        
+        function startAutoPlay() { 
+            if (autoPlayInterval) clearInterval(autoPlayInterval); 
+            autoPlayInterval = setInterval(nextSlide, 5000); 
+        }
+        
+        function stopAutoPlay() { 
+            if (autoPlayInterval) { 
+                clearInterval(autoPlayInterval); 
+                autoPlayInterval = null; 
+            } 
+        }
+
+        // 轮播图事件
+        if (prevBtn) prevBtn.addEventListener('click', () => { prevSlide(); stopAutoPlay(); startAutoPlay(); });
+        if (nextBtn) nextBtn.addEventListener('click', () => { nextSlide(); stopAutoPlay(); startAutoPlay(); });
+        
+        const carouselContainer = document.querySelector('.carousel-container');
+        if (carouselContainer) {
+            carouselContainer.addEventListener('mouseenter', stopAutoPlay);
+            carouselContainer.addEventListener('mouseleave', startAutoPlay);
+        }
+
+        // 初始化轮播
+        initCarousel();
+        startAutoPlay();
+
+        // 滚动动画
+        const observerOptions = { threshold: 0.1, rootMargin: '0px 0px -50px 0px' };
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+        
+        document.querySelectorAll('.feature-card').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(30px)';
+            el.style.transition = 'all 0.6s ease';
+            observer.observe(el);
+        });
+    </script>
 </body>
+
 </html>
