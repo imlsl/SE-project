@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -21,6 +21,8 @@ class SceneGenerationRequest(BaseModel):
     weather: str = ""
     manual_vertices: str = ""
     manual_edges: str = ""
+    layout_points: list[dict[str, Any]] = []
+    selected_assets: list[dict[str, Any]] = []
     scene_id: Optional[int] = None
 
 

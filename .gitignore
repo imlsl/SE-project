@@ -22,7 +22,4 @@ Thumbs.db
 
 # Logs and data files
 admin_operations.log*
-system_uptime.json
-data/blender_tasks.json
-data/blender_diagnostics.json
-data/exports/*
+data/*

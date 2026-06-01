@@ -11,7 +11,7 @@ backend/
 │   │   ├── auth.py         # 认证接口，处理多角色登录与跳转逻辑
 │   │   ├── admin.py        # 系统管理员接口，提供用户管理、日志、运行时间、系统配置与API统计
 │   │   ├── analyst.py      # 行业分析师接口，提供数据大盘、行业指标、报告生成、数据导出与趋势查询
-│   │   ├── modeler.py      # 场景建模师接口，提供场景项目、资产库、布局/草图处理与LLM指令解析
+│   │   ├── modeler.py      # 场景建模师接口，提供场景项目、资产库、布局与LLM指令解析
 │   │   └── blender.py      # Blender生成插件的核心业务接口
 │   ├── models/
 │   │   ├── user.py         # 用户数据模型定义(包含UserRole等)
@@ -65,7 +65,7 @@ backend/
 
 * **场景项目管理**：支持用户个人的 3D 场景项目创建、查询、更新和删除（CRUD），状态区分草稿与已发布。
 * **资产库管理**：提供 `/modeler/assets` 的资产列表读取与新增能力，对应前端资产库刷新和上传入口。当前轻量实现使用 `data/modeler_assets.json` 存储。
-* **布局与草图处理**：提供 `/modeler/layout/apply` 和 `/modeler/sketch/process`，接收前端点集布局和草图文件名，返回可交给 Blender 侧继续处理的节点/道路参数。
+* **布局输入**：提供 `/modeler/layout/apply`，接收前端点集布局，返回可交给 Blender/SCGS 生成流程使用的手动顶点和边参数。
 * **多模态大模型指令集成 (LLM Command)**：新增自然语言转控制指令接口，接收建模师的日常语义（如“在十字路口添加智能路灯”），转化为 Blender 插件所需的标准化参数。
 
 ### 5. 前端已实现需求的后端补齐
@@ -74,7 +74,7 @@ backend/
 
 * 管理员工作台：系统配置保存、系统配置读取、API统计。
 * 行业分析师工作台：周报生成返回结构化报告信息、数据导出、趋势查询。
-* 场景建模师工作台：场景更新、资产库读取/新增、布局点集应用、草图处理。
+* 场景建模师工作台：场景更新、资产库读取/新增、布局点集应用。
 
 这些接口均已注册到 FastAPI 应用中，可以通过 `http://127.0.0.1:8000/docs` 查看和调试。
 
@@ -99,13 +99,13 @@ oad_type、weather、manual_vertices、manual_edges、scale、style 等参数触
 
 .env 中的 SCGS 配置示例：
 
-`env
+```env
 BLENDER_URL=D:/Blender/Blender Foundation/Blender 4.1/blender.exe
 BLENDER_PLUGIN_MODULE=SCGS
 BLENDER_GENERATE_OPERATOR=sna.city_generation
 BLENDER_EDIT_OPERATOR=sna.city_edit
 BLENDER_OPERATOR_FILTER=sna
-`
+```
 
 如果你的真实 SCGS 插件模块名或算子名和默认值不同，先调用 /blender/diagnostics，根据返回的 addons 和 operators 调整上述配置。
 

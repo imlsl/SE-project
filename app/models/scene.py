@@ -59,11 +59,17 @@ class AssetItem(BaseModel):
     name: str
     icon: str
     type: str
+    plugin_type: Optional[str] = None
+    plugin_name: Optional[str] = None
+    material_target: Optional[str] = None
 
 class AssetCreateRequest(BaseModel):
     name: str
     type: str = "model"
     icon: str = "fa-cube"
+    plugin_type: Optional[str] = None
+    plugin_name: Optional[str] = None
+    material_target: Optional[str] = None
 
 class LayoutPoint(BaseModel):
     x: float
@@ -71,9 +77,6 @@ class LayoutPoint(BaseModel):
 
 class LayoutApplyRequest(BaseModel):
     points: List[LayoutPoint]
-
-class SketchProcessRequest(BaseModel):
-    file_name: str
 
 class SceneUpdateRequest(BaseModel):
     name: Optional[str] = None

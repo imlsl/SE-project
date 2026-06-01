@@ -232,7 +232,7 @@ class BlenderService:
 import json
 import traceback
 
-cfg = {json.dumps(cfg, ensure_ascii=False)}
+cfg = json.loads({json.dumps(json.dumps(cfg, ensure_ascii=False), ensure_ascii=False)})
 result = {{
     "blender_started": True,
     "plugin_enabled": False,
@@ -307,8 +307,8 @@ import json
 import os
 import traceback
 
-cfg = {json.dumps(cfg, ensure_ascii=False)}
-params = {json.dumps(params, ensure_ascii=False)}
+cfg = json.loads({json.dumps(json.dumps(cfg, ensure_ascii=False), ensure_ascii=False)})
+params = json.loads({json.dumps(json.dumps(params, ensure_ascii=False), ensure_ascii=False)})
 output_path = {json.dumps(output_path)}
 result = {{"warnings": [], "error": ""}}
 
@@ -335,6 +335,43 @@ def call_operator(operator_name):
         raise RuntimeError(f"未找到算子: {{operator_name}}")
     return operator()
 
+def apply_selected_asset(scene, asset):
+    plugin_name = str(asset.get("plugin_name") or asset.get("name") or "").strip()
+    plugin_type = str(asset.get("plugin_type") or asset.get("type") or "").strip()
+    material_target = str(asset.get("material_target") or "Road").strip()
+    if not plugin_name or not plugin_type:
+        result["warnings"].append(f"Skipped asset with missing plugin fields: {{asset}}")
+        return
+
+    if plugin_type == "Texture":
+        set_if_exists(scene, "sna_street_asset_type", "Texture")
+        set_if_exists(scene, "sna_road_materials_type_", material_target)
+        for op_name in ["sna.material_filter_f04c3", "sna.road_materials_filter_6a3ec"]:
+            try:
+                call_operator(op_name)
+            except Exception as exc:
+                result["warnings"].append(f"Asset filter {{op_name}} failed for {{plugin_name}}: {{exc}}")
+        if not set_if_exists(scene, "sna_road_materials_browser", plugin_name):
+            result["warnings"].append(f"Road material property unavailable for {{plugin_name}}")
+            return
+    else:
+        set_if_exists(scene, "sna_street_asset_type", plugin_type)
+        try:
+            call_operator("sna.filter_street_assets_c5c0e")
+        except Exception as exc:
+            result["warnings"].append(f"Asset filter failed for {{plugin_name}}: {{exc}}")
+        if not set_if_exists(scene, "sna_street_asset_browser", plugin_name):
+            result["warnings"].append(f"Street asset property unavailable for {{plugin_name}}")
+            return
+
+    try:
+        applied = call_operator("sna.road_apply_5c3ab")
+        result.setdefault("applied_assets", []).append(plugin_name)
+        if "CANCELLED" in str(applied):
+            result["warnings"].append(f"Asset apply cancelled for {{plugin_name}}: {{applied}}")
+    except Exception as exc:
+        result["warnings"].append(f"Could not apply asset {{plugin_name}}: {{exc}}")
+
 try:
     import bpy
 
@@ -348,6 +385,9 @@ try:
         result["warnings"].append("BLENDER_PLUGIN_MODULE 为空，将使用当前 Blender 已加载状态。")
 
     scene = bpy.context.scene
+    if params.get("manual_vertices") and params.get("manual_edges"):
+        params["road_type"] = "4"
+
     param_to_props = {{
         "description": ["description", "city_description", "sna_description", "prompt", "instruction"],
         "instruction": ["instruction", "ai_instruction", "sna_ai_instruction", "edit_instruction"],
@@ -374,6 +414,12 @@ try:
     if "CANCELLED" in result["operator_result"]:
         raise RuntimeError(f"生成算子已取消: {{result['operator_result']}}")
 
+    for asset in params.get("selected_assets") or []:
+        try:
+            apply_selected_asset(scene, asset)
+        except Exception as exc:
+            result["warnings"].append(f"Asset application failed: {{asset}}: {{exc}}")
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=output_path)
     result["output_path"] = output_path
@@ -392,15 +438,22 @@ if result["error"]:
         template_id = parameters.get("template_id")
         if template_id in (None, "") and str(description).strip().isdigit():
             template_id = str(description).strip()
+        manual_vertices = str(parameters.get("manual_vertices") or "")
+        manual_edges = str(parameters.get("manual_edges") or "")
+        road_type = str(parameters.get("road_type") or "")
+        if manual_vertices and manual_edges:
+            road_type = "4"
 
         return {
             "description": str(description or ""),
             "instruction": str(parameters.get("instruction") or ""),
             "template_id": str(template_id or ""),
-            "road_type": str(parameters.get("road_type") or ""),
+            "road_type": road_type,
             "weather": str(parameters.get("weather") or ""),
-            "manual_vertices": str(parameters.get("manual_vertices") or ""),
-            "manual_edges": str(parameters.get("manual_edges") or ""),
+            "manual_vertices": manual_vertices,
+            "manual_edges": manual_edges,
+            "layout_points": parameters.get("layout_points") or [],
+            "selected_assets": parameters.get("selected_assets") or [],
             "style": str(parameters.get("style") or "default"),
             "scale": parameters.get("scale", 1.0),
         }
