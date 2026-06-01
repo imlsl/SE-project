@@ -1,4 +1,4 @@
-// 角色基类 - 所有角色UI的抽象基类
+// 角色基类 - 所有角色 UI 的抽象基类
 class BaseRoleUI {
     constructor(containerId, username) {
         this.container = document.getElementById(containerId);
@@ -63,11 +63,9 @@ class BaseRoleUI {
                 </div>
             `;
             document.body.appendChild(this.loadingDiv);
-        } else {
-            if (this.loadingDiv) {
-                this.loadingDiv.remove();
-                this.loadingDiv = null;
-            }
+        } else if (this.loadingDiv) {
+            this.loadingDiv.remove();
+            this.loadingDiv = null;
         }
     }
 
@@ -86,16 +84,18 @@ class BaseRoleUI {
         `;
     }
 
-    // 发起API请求
+    // 发起 API 请求
     async apiRequest(endpoint, options = {}) {
         const rawUser = localStorage.getItem('smartcity_current_user');
         const currentUser = rawUser ? JSON.parse(rawUser) : null;
         const token = currentUser ? currentUser.token : null;
 
         const headers = {
-            'Content-Type': 'application/json',
             ...options.headers
         };
+        if (!headers['Content-Type']) {
+            headers['Content-Type'] = 'application/json';
+        }
 
         if (token && !headers['Authorization']) {
             headers['Authorization'] = `Bearer ${token}`;
@@ -111,7 +111,7 @@ class BaseRoleUI {
             });
 
             if (response.status === 401) {
-                // Token过期，跳转登录
+                // Token 过期，跳转登录
                 window.location.href = 'index.html';
                 return null;
             }

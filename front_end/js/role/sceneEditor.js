@@ -8,6 +8,7 @@ class SceneEditorUI extends BaseRoleUI {
         this.blenderBridge = window.blenderBridge;
         this.lastDownloadUrl = '';
         this.availableAssets = [];
+        this.layoutPoints = [];
         this.templatePresets = [
             { id: '0', name: '现代风格', detail: '树木1 · 道路纹理2 · 座椅1' },
             { id: '1', name: '古典风格', detail: '树木2 · 道路纹理1 · 座椅2' },
@@ -135,7 +136,7 @@ class SceneEditorUI extends BaseRoleUI {
                             <button class="small-btn" id="generateSceneBtn"><i class="fas fa-wand-magic-sparkles"></i> 调用 SCGS 生成</button>
                             <a id="blendDownloadLink" class="small-btn outline" href="#" target="_blank" style="display: none; text-decoration: none;"><i class="fas fa-download"></i> 下载 .blend</a>
                         </div>
-                        <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">生成任务会调用 Blender 中已安装的 SCGS 插件，仓库样例仅作为参考。</div>
+                        <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">生成任务会调用 Blender 中已安装的 SCGS 插件。</div>
                     </div>
 
                     <div id="editTab_edit" style="margin-top: 0.9rem; display: none;">
@@ -191,7 +192,6 @@ class SceneEditorUI extends BaseRoleUI {
                         <div id="editAssetCatalog" style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">资产库加载中...</div>
                         <div id="editAssetList" style="margin-top: 0.6rem; font-size: 0.75rem; color: #94a3b8;"></div>
                     </div>
-
 
                     <div id="editTab_render" style="margin-top: 0.9rem; display: none;">
                         <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -267,7 +267,7 @@ class SceneEditorUI extends BaseRoleUI {
         document.getElementById('copyLogBtn')?.addEventListener('click', () => this.copyLog());
         document.getElementById('clearLogBtn')?.addEventListener('click', () => {
             this.blenderBridge?.clearLog();
-            this.logEditAction('Log cleared.', 'system');
+            this.logEditAction('日志已清空。', 'system');
         });
         document.getElementById('backToListBtn')?.addEventListener('click', () => { window.location.href = 'modeler.html'; });
         document.getElementById('logoutBtn')?.addEventListener('click', () => {
@@ -379,6 +379,13 @@ class SceneEditorUI extends BaseRoleUI {
     }
 
     collectGenerationParams() {
+        const manualVertices = document.getElementById('manualVertices')?.value.trim() || '';
+        const manualEdges = document.getElementById('manualEdges')?.value.trim() || '';
+        let roadType = document.getElementById('generateRoadType')?.value || '';
+        if (manualVertices && manualEdges) {
+            roadType = '4';
+        }
+
         return {
             scene_id: this.scene.id || null,
             city_name: document.getElementById('editSceneName')?.value.trim() || this.scene.name || '',
@@ -533,21 +540,33 @@ class SceneEditorUI extends BaseRoleUI {
             this.showMessage('请输入资产名称', 'error');
             return;
         }
-        if (this.availableAssets.length > 0) {
-            const match = this.availableAssets.find(asset => asset.name.toLowerCase() === name.toLowerCase());
-            if (!match) {
-                this.showMessage('资产库中未找到该资产', 'error');
-                return;
-            }
+        const asset = this.findAssetByName(name);
+        if (!asset) {
+            this.showMessage('资产库中未找到该资产', 'error');
+            return;
         }
-        if (this.editAssets.some(asset => asset.toLowerCase() === name.toLowerCase())) {
+        this.addAssetToSelection(asset);
+        input.value = '';
+    }
+
+    addAssetFromCatalog(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const item = target.closest('[data-asset-id]');
+        if (!item) return;
+        const asset = this.availableAssets.find(candidate => String(candidate.id) === item.getAttribute('data-asset-id'));
+        if (asset) this.addAssetToSelection(asset);
+    }
+
+    addAssetToSelection(asset) {
+        if (this.editAssets.some(item => String(item.id) === String(asset.id) || item.name.toLowerCase() === asset.name.toLowerCase())) {
             this.showMessage('该资产已添加', 'error');
             return;
         }
-        this.editAssets.push(name);
-        input.value = '';
+        this.editAssets.push(asset);
         this.renderEditAssets();
-        this.blenderBridge?.addAsset('model', name);
+        this.blenderBridge?.addAsset(asset.plugin_type || asset.type || 'model', asset.plugin_name || asset.name);
+        this.showMessage('资产已选择并加入生成参数', 'info');
     }
 
     removeAssetFromClick(event) {
@@ -560,7 +579,6 @@ class SceneEditorUI extends BaseRoleUI {
         this.editAssets.splice(index, 1);
         this.renderEditAssets();
     }
-
 
     startRender() {
         const button = document.getElementById('renderSceneBtn');
@@ -639,11 +657,11 @@ class SceneEditorUI extends BaseRoleUI {
             list.innerHTML = '<div style="color: #64748b;">暂无已选资产</div>';
             return;
         }
-        list.innerHTML = this.editAssets.map((name, idx) => (
+        list.innerHTML = this.editAssets.map((asset, idx) => (
             `<span class="scene-asset-tag">
-                <i class="fas fa-cube"></i>
-                ${this.escapeHTML(name)}
-                <button type="button" data-remove-asset="${idx}" aria-label="移除资产 ${this.escapeHTML(name)}"><i class="fas fa-times"></i></button>
+                <i class="fas ${asset.icon || 'fa-cube'}"></i>
+                ${this.escapeHTML(asset.name)}
+                <button type="button" data-remove-asset="${idx}" aria-label="移除资产 ${this.escapeHTML(asset.name)}"><i class="fas fa-times"></i></button>
             </span>`
         )).join('');
     }
@@ -654,28 +672,45 @@ class SceneEditorUI extends BaseRoleUI {
         try {
             const response = await this.apiRequest('/modeler/assets', { method: 'GET' });
             if (response && !response.detail) {
-                this.availableAssets = response;
+                this.availableAssets = Array.isArray(response) ? response : [];
                 if (catalog) {
                     if (this.availableAssets.length === 0) {
                         catalog.textContent = '资产库为空，可在建模师页面新增资产。';
                         return;
                     }
                     catalog.innerHTML = this.availableAssets.map(asset => (
-                        `<span class="scene-asset-tag" style="margin-right: 0.35rem;">
+                        `<button type="button" class="scene-asset-tag" data-asset-id="${this.escapeHTML(asset.id)}" style="margin-right: 0.35rem; cursor: pointer;">
                             <i class="fas ${asset.icon || 'fa-cube'}"></i>
                             ${this.escapeHTML(asset.name)}
-                        </span>`
+                        </button>`
                     )).join('');
                 }
             } else if (catalog) {
                 catalog.textContent = response?.detail || '资产库加载失败';
             }
         } catch (error) {
-            console.error('加载资产库失败:', error);
+            console.error('加载资产库失败', error);
             if (catalog) catalog.textContent = '资产库加载失败';
         }
     }
 
+    findAssetByName(name) {
+        const lowerName = name.toLowerCase();
+        return this.availableAssets.find(asset =>
+            asset.name?.toLowerCase() === lowerName ||
+            asset.plugin_name?.toLowerCase() === lowerName
+        );
+    }
+
+    assetPayload(asset) {
+        return {
+            id: asset.id,
+            name: asset.name,
+            plugin_name: asset.plugin_name || asset.name,
+            plugin_type: asset.plugin_type || asset.type || 'model',
+            material_target: asset.material_target || null
+        };
+    }
 
     formatTaskStatus(task) {
         const warningText = task.warnings?.length ? ` Warnings: ${task.warnings.join('; ')}` : '';
@@ -688,7 +723,6 @@ class SceneEditorUI extends BaseRoleUI {
         status.textContent = message;
         status.style.color = this.feedbackColor(type);
     }
-
 
     setSceneSaveStatus(message, type = 'success') {
         const status = document.getElementById('sceneSaveStatus');
