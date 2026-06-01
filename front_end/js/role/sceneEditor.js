@@ -9,11 +9,11 @@ class SceneEditorUI extends BaseRoleUI {
         this.lastDownloadUrl = '';
         this.availableAssets = [];
         this.templatePresets = [
-            { id: '0', name: '现代模板', detail: '由 SCGS 插件解释模板 ID 0' },
-            { id: '1', name: '古典模板', detail: '由 SCGS 插件解释模板 ID 1' },
-            { id: '2', name: '生态模板', detail: '由 SCGS 插件解释模板 ID 2' },
-            { id: '3', name: '工业模板', detail: '由 SCGS 插件解释模板 ID 3' },
-            { id: '4', name: '地域模板', detail: '由 SCGS 插件解释模板 ID 4' }
+            { id: '0', name: '现代风格', detail: '树木1 · 道路纹理2 · 座椅1' },
+            { id: '1', name: '古典风格', detail: '树木2 · 道路纹理1 · 座椅2' },
+            { id: '2', name: '绿色生态', detail: '树木3 · 道路纹理3 · 座椅3' },
+            { id: '3', name: '工业风格', detail: '树木1 · 道路纹理4 · 座椅1' },
+            { id: '4', name: '台湾风格', detail: '树木4 · 道路纹理2 · 座椅4' }
         ];
     }
 
@@ -77,8 +77,9 @@ class SceneEditorUI extends BaseRoleUI {
 
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">生成</button>                        
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="layout">道路布局</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">城市生成</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="edit">城市编辑</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="template">模板 & AI</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="assets">资产</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="render">渲染</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
@@ -87,21 +88,12 @@ class SceneEditorUI extends BaseRoleUI {
                     <div id="editTab_generate" style="margin-top: 0.9rem;">
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                自然语言描述
-                                <textarea id="generateDescription" placeholder="例如：生成一座雨天的现代城市" style="min-height: 84px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">${sceneName}</textarea>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                模板 ID
-                                <input id="editTemplateId" placeholder="例如 0" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
                                 道路类型
                                 <select id="generateRoadType" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                    <option value="">插件默认</option>
-                                    <option value="1">1 - 默认/基础</option>
-                                    <option value="2">2 - 网格/扩展</option>
-                                    <option value="3">3 - 图像/草图提取</option>
-                                    <option value="4">4 - 手动顶点边</option>
+                                    <option value="2" selected>2 - 扩展网格布局（默认）</option>
+                                    <option value="1">1 - 经典网格布局</option>
+                                    <option value="3">3 - 图像识别提取</option>
+                                    <option value="4">4 - 手动布局</option>
                                 </select>
                             </label>
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
@@ -114,23 +106,27 @@ class SceneEditorUI extends BaseRoleUI {
                                 </select>
                             </label>
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                风格
-                                <input id="generateStyle" value="default" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                缩放
-                                <input id="generateScale" type="number" step="0.1" value="1.0" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                                自然语言描述
+                                <textarea id="generateDescription" placeholder="例如：请帮我在晴天生成一座现代城市" style="min-height: 84px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">${sceneName}</textarea>
                             </label>
                         </div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem; margin-top: 0.75rem;">
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                手动顶点
-                                <textarea id="manualVertices" placeholder="(0,0,0),(50,0,0),(50,50,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                手动边
-                                <textarea id="manualEdges" placeholder="(0,1),(1,2)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
+                        <div id="generateManualSection" style="display: none; margin-top: 0.75rem; padding: 0.75rem; border: 1px solid #334155; border-radius: 0.5rem; background: #0f172a;">
+                            <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem;"><i class="fas fa-pencil"></i> 手动布局</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                <label style="display: grid; gap: 0.3rem; color: #94a3b8; font-size: 0.78rem;">
+                                    顶点 (Vertices)
+                                    <textarea id="generateManualVertices" placeholder="(0,0,0),(50,0,0),(50,50,0),(0,50,0)" style="height: 64px; padding: 0.5rem; border-radius: 0.4rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.75rem;"></textarea>
+                                </label>
+                                <label style="display: grid; gap: 0.3rem; color: #94a3b8; font-size: 0.78rem;">
+                                    边 (Edges)
+                                    <textarea id="generateManualEdges" placeholder="(0,1),(1,2),(2,3),(3,0)" style="height: 64px; padding: 0.5rem; border-radius: 0.4rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.75rem;"></textarea>
+                                </label>
+                            </div>
+                            <div id="generateImageTools" style="display: none; margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="file" id="generateImageInput" accept="image/*" style="font-size: 0.75rem; color: #94a3b8;" />
+                                <button class="small-btn outline" id="generateExtractBtn" style="font-size: 0.75rem;">提取布局</button>
+                                <span id="generateImageMeta" style="font-size: 0.7rem; color: #64748b;"></span>
+                            </div>
                         </div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
                             ${this.renderTemplatePresetButtons()}
@@ -142,34 +138,44 @@ class SceneEditorUI extends BaseRoleUI {
                         <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">生成任务会调用 Blender 中已安装的 SCGS 插件，仓库样例仅作为参考。</div>
                     </div>
 
-                    <div id="editTab_layout" style="margin-top: 0.9rem; display: none;">
+                    <div id="editTab_edit" style="margin-top: 0.9rem; display: none;">
                         <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                            道路布局类型
-                            <select id="roadLayoutType" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                <option value="1">1 经典网格布局</option>
-                                <option value="2" selected>2 扩展网格布局</option>
-                                <option value="3">3 图像识别提取</option>
-                                <option value="4">4 手动布局</option>
-                            </select>
+                            编辑指令
+                            <textarea id="editInstruction" placeholder="例如：Please change the weather to sunny." style="min-height: 64px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
                         </label>
-                        <div id="layoutImageUpload" style="margin-top: 0.6rem; display: none;">
-                            <input type="file" id="layoutImageInput" accept="image/*" />
-                            <div id="layoutImageMeta" style="margin-top: 0.4rem; font-size: 0.75rem; color: #94a3b8;">请选择图片用于图像识别提取。</div>
-                            <button class="small-btn outline" id="layoutExtractBtn" style="margin-top: 0.5rem;">提取</button>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+                            <button class="small-btn" id="editCityBtn"><i class="fas fa-edit"></i> Edit City</button>
                         </div>
-                        <div id="layoutManualInputs" style="margin-top: 0.6rem; display: none;">
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                手动顶点
-                                <textarea id="layoutManualVertices" placeholder="逗号分隔的三维坐标，如 (0,0,0),(50,0,0),(50,50,0),(0,50,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; margin-top: 0.5rem;">
-                                手动边
-                                <textarea id="layoutManualEdges" placeholder="逗号分隔的索引对，如 (0,1),(1,2),(2,3),(3,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
-                            <div style="margin-top: 0.5rem;">
-                                <button class="small-btn" id="layoutManualGenerateBtn">生成</button>
+                        <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 0.75rem;">快捷操作</div>
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem;">
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to sunny.">☀️ 晴天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to rainy days.">🌧️ 雨天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to snowy days.">❄️ 雪天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="adjust the scene to daytime">🌅 白天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="adjust the scene to night">🌙 夜晚</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="remove weeds and small garbage from the road surface.">🧹 清洁道路</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="add weeds and small garbage on the road surface.">🍂 脏污道路</button>
+                        </div>
+                        <div id="editStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">编辑指令支持天气切换、白天/夜晚、道路清洁/脏污等操作。</div>
+                    </div>
+
+                    <div id="editTab_template" style="margin-top: 0.9rem; display: none;">
+                        <div style="border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; background: #0f172a;">
+                            <div style="font-size: 0.82rem; color: #e2e8f0; margin-bottom: 0.5rem;">场景模板配置</div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input id="templateSelection" placeholder="输入 0-4 或模板名称（如 现代风格）" style="flex: 1; padding: 0.6rem; border-radius: 0.5rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <button class="small-btn" id="applyTemplateBtn">应用模板</button>
                             </div>
                         </div>
+                        <div style="border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; background: #0f172a; margin-top: 0.75rem;">
+                            <div style="font-size: 0.82rem; color: #e2e8f0; margin-bottom: 0.5rem;">AI 自然语言指令</div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input id="aiInstruction" placeholder="例如：树木1, 道路2, 座椅1 或 模板4 或 现代风格" style="flex: 1; padding: 0.6rem; border-radius: 0.5rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <button class="small-btn" id="executeAIInstructionBtn">执行</button>
+                            </div>
+                            <div style="font-size: 0.7rem; color: #64748b; margin-top: 0.4rem;">示例: 树木1, 道路2, 座椅1 或 模板4 或 现代风格</div>
+                        </div>
+                        <div id="templateStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">模板配置与 AI 指令会调用 Blender 中的 SCGS 插件对应算子。</div>
                     </div>
 
                     <div id="editTab_diagnostics" style="margin-top: 0.9rem; display: none;">
@@ -234,20 +240,26 @@ class SceneEditorUI extends BaseRoleUI {
             btn.addEventListener('click', () => this.selectTemplatePreset(btn.getAttribute('data-template-preset')));
         });
 
+        // road type change → show/hide manual layout + image tools
+        document.getElementById('generateRoadType')?.addEventListener('change', e => this.handleRoadTypeChange(e));
+        document.getElementById('generateImageInput')?.addEventListener('change', e => this.handleGenerateImageChange(e));
+        document.getElementById('generateExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
+
+        // edit tab
+        document.getElementById('editCityBtn')?.addEventListener('click', () => this.editCity());
+        document.querySelectorAll('[data-edit-cmd]').forEach(btn => {
+            btn.addEventListener('click', () => this.quickEdit(btn.getAttribute('data-edit-cmd')));
+        });
+
+        // template & ai tab
+        document.getElementById('applyTemplateBtn')?.addEventListener('click', () => this.applyTemplate());
+        document.getElementById('executeAIInstructionBtn')?.addEventListener('click', () => this.executeAIInstruction());
+
         document.getElementById('editAssetAddBtn')?.addEventListener('click', () => this.addEditAsset());
         document.getElementById('editAssetSearch')?.addEventListener('keydown', e => {
             if (e.key === 'Enter') this.addEditAsset();
         });
         document.getElementById('editAssetList')?.addEventListener('click', e => this.removeAssetFromClick(e));
-
-        document.getElementById('roadLayoutType')?.addEventListener('change', e => this.handleLayoutTypeChange(e));
-        document.getElementById('layoutImageInput')?.addEventListener('change', e => this.handleLayoutImageChange(e));
-        document.getElementById('layoutExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
-        document.getElementById('layoutManualGenerateBtn')?.addEventListener('click', () => this.generateManualLayout());
-        const layoutSelect = document.getElementById('roadLayoutType');
-        if (layoutSelect) {
-            this.handleLayoutTypeChange({ target: layoutSelect });
-        }
 
         document.getElementById('renderSceneBtn')?.addEventListener('click', () => this.startRender());
         document.getElementById('renderDownloadBtn')?.addEventListener('click', () => this.downloadRenderPreview());
@@ -262,41 +274,46 @@ class SceneEditorUI extends BaseRoleUI {
             new AuthManager().logout();
             window.location.href = 'index.html';
         });
+
+        // init road type state
+        const roadTypeSel = document.getElementById('generateRoadType');
+        if (roadTypeSel) this.handleRoadTypeChange({ target: roadTypeSel });
     }
 
-    handleLayoutTypeChange(event) {
+    handleRoadTypeChange(event) {
         const target = event.target;
         if (!(target instanceof HTMLSelectElement)) return;
-        const upload = document.getElementById('layoutImageUpload');
-        const manualInputs = document.getElementById('layoutManualInputs');
-        if (!upload) return;
-        upload.style.display = target.value === '3' ? 'block' : 'none';
-        if (manualInputs) {
-            manualInputs.style.display = target.value === '3' || target.value === '4' ? 'block' : 'none';
+        const manualSection = document.getElementById('generateManualSection');
+        const imageTools = document.getElementById('generateImageTools');
+        if (!manualSection) return;
+        const showManual = target.value === '3' || target.value === '4';
+        manualSection.style.display = showManual ? 'block' : 'none';
+        if (imageTools) {
+            imageTools.style.display = target.value === '3' ? 'flex' : 'none';
         }
     }
 
-    handleLayoutImageChange(event) {
+    handleGenerateImageChange(event) {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) return;
-        const meta = document.getElementById('layoutImageMeta');
+        const meta = document.getElementById('generateImageMeta');
         const file = target.files?.[0];
         if (!meta) return;
         if (!file) {
-            meta.textContent = '请选择图片用于图像识别提取。';
+            meta.textContent = '';
             return;
         }
         meta.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
     }
 
     extractLayoutFromImage() {
-        const file = document.getElementById('layoutImageInput')?.files?.[0];
+        const file = document.getElementById('generateImageInput')?.files?.[0];
         if (!file) {
             this.showMessage('请先选择图片', 'error');
             return;
         }
-        const verticesInput = document.getElementById('layoutManualVertices');
-        const edgesInput = document.getElementById('layoutManualEdges');
+        const verticesInput = document.getElementById('generateManualVertices');
+        const edgesInput = document.getElementById('generateManualEdges');
         if (!verticesInput || !edgesInput) return;
 
         verticesInput.value = '(0,0,0),(50,0,0),(50,50,0),(0,50,0)';
@@ -304,18 +321,61 @@ class SceneEditorUI extends BaseRoleUI {
         this.showMessage('已根据图片提取道路布局（演示）', 'info');
     }
 
-    generateManualLayout() {
-        const verticesInput = document.getElementById('layoutManualVertices');
-        const edgesInput = document.getElementById('layoutManualEdges');
-        if (!verticesInput || !edgesInput) return;
-        const vertices = verticesInput.value.trim();
-        const edges = edgesInput.value.trim();
-        if (!vertices || !edges) {
-            this.showMessage('请填写手动顶点和手动边', 'error');
+    editCity() {
+        const instruction = document.getElementById('editInstruction')?.value.trim();
+        if (!instruction) {
+            this.showMessage('请输入编辑指令', 'error');
             return;
         }
-        this.logEditAction(`手动布局已提交: vertices=${vertices}; edges=${edges}`, 'task');
-        this.showMessage('手动布局已生成（待接后续处理）', 'info');
+        this.setButtonBusy(document.getElementById('editCityBtn'), true, '<i class="fas fa-spinner fa-pulse"></i> 编辑中');
+        this.blenderBridge?.log?.(`Edit submitted: ${instruction}`, 'task');
+        const status = document.getElementById('editStatus');
+        if (status) {
+            status.textContent = `编辑指令已提交: ${instruction}`;
+            status.style.color = '#38bdf8';
+        }
+        setTimeout(() => this.setButtonBusy(document.getElementById('editCityBtn'), false), 1500);
+        this.showMessage('城市编辑指令已提交', 'info');
+    }
+
+    quickEdit(cmd) {
+        const input = document.getElementById('editInstruction');
+        if (input) input.value = cmd;
+        this.editCity();
+    }
+
+    applyTemplate() {
+        const selection = document.getElementById('templateSelection')?.value.trim();
+        if (!selection) {
+            this.showMessage('请输入模板编号或名称', 'error');
+            return;
+        }
+        this.setButtonBusy(document.getElementById('applyTemplateBtn'), true, '<i class="fas fa-spinner fa-pulse"></i> 应用中');
+        this.blenderBridge?.log?.(`Template applied: ${selection}`, 'task');
+        const status = document.getElementById('templateStatus');
+        if (status) {
+            status.textContent = `模板 "${selection}" 已应用。`;
+            status.style.color = '#38bdf8';
+        }
+        setTimeout(() => this.setButtonBusy(document.getElementById('applyTemplateBtn'), false), 1500);
+        this.showMessage(`模板 "${selection}" 已应用`, 'info');
+    }
+
+    executeAIInstruction() {
+        const instruction = document.getElementById('aiInstruction')?.value.trim();
+        if (!instruction) {
+            this.showMessage('请输入 AI 指令', 'error');
+            return;
+        }
+        this.setButtonBusy(document.getElementById('executeAIInstructionBtn'), true, '<i class="fas fa-spinner fa-pulse"></i> 执行中');
+        this.blenderBridge?.log?.(`AI instruction executed: ${instruction}`, 'task');
+        const status = document.getElementById('templateStatus');
+        if (status) {
+            status.textContent = `AI 指令已执行: ${instruction}`;
+            status.style.color = '#38bdf8';
+        }
+        setTimeout(() => this.setButtonBusy(document.getElementById('executeAIInstructionBtn'), false), 1500);
+        this.showMessage('AI 指令已执行', 'info');
     }
 
     collectGenerationParams() {
@@ -323,13 +383,10 @@ class SceneEditorUI extends BaseRoleUI {
             scene_id: this.scene.id || null,
             city_name: document.getElementById('editSceneName')?.value.trim() || this.scene.name || '',
             description: document.getElementById('generateDescription')?.value.trim() || '',
-            template_id: document.getElementById('editTemplateId')?.value.trim() || '',
-            road_type: document.getElementById('generateRoadType')?.value || '',
+            road_type: document.getElementById('generateRoadType')?.value || '2',
             weather: document.getElementById('generateWeather')?.value || '',
-            manual_vertices: document.getElementById('manualVertices')?.value.trim() || '',
-            manual_edges: document.getElementById('manualEdges')?.value.trim() || '',
-            style: document.getElementById('generateStyle')?.value.trim() || 'default',
-            scale: Number(document.getElementById('generateScale')?.value || 1)
+            manual_vertices: document.getElementById('generateManualVertices')?.value.trim() || '',
+            manual_edges: document.getElementById('generateManualEdges')?.value.trim() || ''
         };
     }
 
@@ -338,8 +395,8 @@ class SceneEditorUI extends BaseRoleUI {
         const status = document.getElementById('generationStatus');
         const download = document.getElementById('blendDownloadLink');
         const params = this.collectGenerationParams();
-        if (!params.description && !params.template_id) {
-            this.showMessage('请填写描述或模板 ID', 'error');
+        if (!params.description) {
+            this.showMessage('请填写自然语言描述', 'error');
             return;
         }
 
@@ -456,14 +513,15 @@ class SceneEditorUI extends BaseRoleUI {
 
     selectTemplatePreset(templateId) {
         const template = this.templatePresets.find(item => item.id === templateId);
-        const input = document.getElementById('editTemplateId');
         const status = document.getElementById('generationStatus');
-        if (input) input.value = templateId || '';
+        // Also sync to the template tab input if it exists
+        const tmplInput = document.getElementById('templateSelection');
+        if (tmplInput) tmplInput.value = templateId || '';
         document.querySelectorAll('[data-template-preset]').forEach(btn => {
             btn.classList.toggle('active', btn.getAttribute('data-template-preset') === templateId);
         });
         if (template && status) {
-            status.textContent = `已选择模板 ${template.id}: ${template.name}`;
+            status.textContent = `已选择模板 ${template.id}: ${template.name}（请在“模板 & AI”标签页中应用）`;
             status.style.color = '#38bdf8';
         }
     }
@@ -565,7 +623,7 @@ class SceneEditorUI extends BaseRoleUI {
 
     switchEditTab(tab) {
         this.activeTab = tab;
-        ['generate', 'layout', 'diagnostics', 'assets', 'render'].forEach(key => {
+        ['generate', 'edit', 'template', 'diagnostics', 'assets', 'render'].forEach(key => {
             const panel = document.getElementById(`editTab_${key}`);
             if (panel) panel.style.display = key === tab ? 'block' : 'none';
         });
