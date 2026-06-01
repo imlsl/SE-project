@@ -498,9 +498,11 @@ class SystemAdminUI extends BaseRoleUI {
             if (response && !response.detail) {
                 this.systemSettings = response;
                 this.showMessage('配置已保存', 'info');
-                
-                this.refreshLogs();
-            });
+                await this.refreshLogs();
+            }
+        } catch (error) {
+            console.error('保存系统设置失败:', error);
+            this.showMessage('保存系统设置失败: ' + (error.message || error), 'error');
         }
     }
 
