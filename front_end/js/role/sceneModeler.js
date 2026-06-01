@@ -4,6 +4,7 @@ class SceneModelerUI extends BaseRoleUI {
         super(containerId, username);
         this.scenes = [];
         this.selectedScene = null;
+        this.assets = [];
     }
 
     get blenderBridge() {
@@ -15,6 +16,7 @@ class SceneModelerUI extends BaseRoleUI {
         
         this.showLoading(true);
         await this.loadScenes();
+        await this.loadAssets();
         
         this.container.innerHTML = `
             <div class="role-panel">
@@ -27,7 +29,7 @@ class SceneModelerUI extends BaseRoleUI {
                     
                     <div class="stats-grid" id="statsGrid">
                         ${this.createStatCard('我的场景', this.scenes.length, 'fas fa-layer-group', '#38bdf8')}
-                        ${this.createStatCard('资产总数', 156, 'fas fa-cubes', '#a78bfa')}
+                        ${this.createStatCard('资产总数', this.assets.length, 'fas fa-cubes', '#a78bfa')}
                         ${this.createStatCard('渲染任务', 3, 'fas fa-video', '#f59e0b')}
                         ${this.createStatCard('存储占用', '2.4GB', 'fas fa-hdd', '#10b981')}
                     </div>
@@ -82,6 +84,24 @@ class SceneModelerUI extends BaseRoleUI {
         }
     }
 
+    async loadAssets() {
+        try {
+            const response = await this.apiRequest('/modeler/assets', {
+                method: 'GET',
+                headers: {
+                    'X-Username': this.username
+                }
+            });
+
+            if (response) {
+                this.assets = response;
+            }
+        } catch (error) {
+            console.error('加载资产列表失败:', error);
+            this.showMessage('加载资产列表失败', 'error');
+        }
+    }
+
     renderSceneList() {
         if (this.scenes.length === 0) {
             return '<div style="text-align: center; padding: 2rem; color: #64748b;">暂无场景，点击上方按钮创建</div>';
@@ -103,22 +123,51 @@ class SceneModelerUI extends BaseRoleUI {
     }
 
     renderAssetGrid() {
-        const assets = [
-            { name: '现代建筑', icon: 'fa-building', type: 'model' },
-            { name: '柏油路面', icon: 'fa-road', type: 'texture' },
-            { name: 'LED路灯', icon: 'fa-lightbulb', type: 'model' },
-            { name: '绿化带', icon: 'fa-tree', type: 'model' },
-            { name: '人行道', icon: 'fa-walking', type: 'texture' },
-            { name: '交通标志', icon: 'fa-traffic-light', type: 'model' }
-        ];
+        if (this.assets.length === 0) {
+            return '<div style="color: #94a3b8;">暂无资产，请点击“上传资产”</div>';
+        }
         
-        return assets.map(asset => `
+        return this.assets.map(asset => `
             <div style="background: #1e293b; border-radius: 0.75rem; padding: 0.75rem; text-align: center; cursor: pointer;" class="asset-item" data-asset="${asset.name}">
-                <i class="fas ${asset.icon}" style="font-size: 2rem; color: #38bdf8;"></i>
+                <i class="fas ${asset.icon || 'fa-cube'}" style="font-size: 2rem; color: #38bdf8;"></i>
                 <div style="font-size: 0.7rem; margin-top: 0.5rem;">${asset.name}</div>
                 <div style="font-size: 0.6rem; color: #64748b;">${asset.type}</div>
             </div>
         `).join('');
+    }
+
+    async handleCreateAsset() {
+        const assetName = prompt('请输入资产名称');
+        if (!assetName) return;
+        const assetType = prompt('请输入资产类型', '设施') || '设施';
+        const assetIcon = prompt('请输入 Font Awesome 图标 (例如 fa-cube)', 'fa-cube') || 'fa-cube';
+
+        try {
+            const response = await this.apiRequest('/modeler/assets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify({
+                    name: assetName,
+                    type: assetType,
+                    icon: assetIcon
+                })
+            });
+
+            if (response && response.asset) {
+                this.assets.unshift(response.asset);
+            }
+            const grid = document.getElementById('assetGrid');
+            if (grid) grid.innerHTML = this.renderAssetGrid();
+            this.bindAssetEvents();
+            this.refreshStats();
+            this.showMessage('资产已创建', 'success');
+        } catch (error) {
+            console.error('Asset create failed', error);
+            this.showMessage('资产创建失败', 'error');
+        }
     }
 
     bindEvents() {
@@ -158,21 +207,40 @@ class SceneModelerUI extends BaseRoleUI {
         // 添加资产
         const addAssetBtn = document.getElementById('addAssetBtn');
         if (addAssetBtn) {
-            addAssetBtn.addEventListener('click', () => {
-                this.showMessage('资产上传功能开发中', 'info');
-            });
+            addAssetBtn.addEventListener('click', () => this.handleCreateAsset());
         }
         
         // 刷新资产
         const refreshAssetsBtn = document.getElementById('refreshAssetsBtn');
         if (refreshAssetsBtn) {
-            refreshAssetsBtn.addEventListener('click', () => {
+            refreshAssetsBtn.addEventListener('click', async () => {
+                await this.loadAssets();
+                const grid = document.getElementById('assetGrid');
+                if (grid) grid.innerHTML = this.renderAssetGrid();
+                this.bindAssetEvents();
+                this.refreshStats();
                 this.showMessage('资产库已刷新', 'info');
             });
         }
         
         
-        // 资产点击事件
+        this.bindAssetEvents();
+        
+        this.bindSceneEvents();
+    }
+
+    refreshStats() {
+        const statsGrid = document.getElementById('statsGrid');
+        if (!statsGrid) return;
+        statsGrid.innerHTML = `
+            ${this.createStatCard('我的场景', this.scenes.length, 'fas fa-layer-group', '#38bdf8')}
+            ${this.createStatCard('资产总数', this.assets.length, 'fas fa-cubes', '#a78bfa')}
+            ${this.createStatCard('渲染任务', 3, 'fas fa-video', '#f59e0b')}
+            ${this.createStatCard('存储占用', '2.4GB', 'fas fa-hdd', '#10b981')}
+        `;
+    }
+
+    bindAssetEvents() {
         document.querySelectorAll('.asset-item').forEach(item => {
             item.addEventListener('click', () => {
                 const assetName = item.dataset.asset;
@@ -183,8 +251,6 @@ class SceneModelerUI extends BaseRoleUI {
                 }
             });
         });
-        
-        this.bindSceneEvents();
     }
 
     bindSceneEvents() {
