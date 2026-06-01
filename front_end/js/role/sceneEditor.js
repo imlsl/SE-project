@@ -91,8 +91,8 @@ class SceneEditorUI extends BaseRoleUI {
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
                                 道路类型
                                 <select id="generateRoadType" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                    <option value="2" selected>2 - 扩展网格布局（默认）</option>
                                     <option value="1">1 - 经典网格布局</option>
+                                    <option value="2" selected>2 - 扩展网格布局（默认）</option>
                                     <option value="3">3 - 图像识别提取</option>
                                     <option value="4">4 - 手动布局</option>
                                 </select>
@@ -101,14 +101,14 @@ class SceneEditorUI extends BaseRoleUI {
                                 天气
                                 <select id="generateWeather" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                                     <option value="">插件默认</option>
-                                    <option value="sunny">sunny</option>
-                                    <option value="rainy">rainy</option>
-                                    <option value="snowy">snowy</option>
+                                    <option value="sunny">晴天</option>
+                                    <option value="rainy">雨天</option>
+                                    <option value="snowy">雪天</option>
                                 </select>
                             </label>
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
                                 自然语言描述
-                                <textarea id="generateDescription" placeholder="例如：请帮我在晴天生成一座现代城市" style="min-height: 84px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">${sceneName}</textarea>
+                                <textarea id="generateDescription" placeholder="例如：请帮我在晴天生成一座现代城市" style="min-height: 84px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
                             </label>
                         </div>
                         <div id="generateManualSection" style="display: none; margin-top: 0.75rem; padding: 0.75rem; border: 1px solid #334155; border-radius: 0.5rem; background: #0f172a;">
@@ -185,12 +185,26 @@ class SceneEditorUI extends BaseRoleUI {
                     </div>
 
                     <div id="editTab_assets" style="margin-top: 0.9rem; display: none;">
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <input id="editAssetSearch" placeholder="输入资产名称" style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            <button class="small-btn outline" id="editAssetAddBtn">添加</button>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem;">
+                            <button class="small-btn" id="uploadAssetBtn"><i class="fas fa-upload"></i> 上传资产</button>
+                            <button class="small-btn outline" id="refreshAssetsBtn" title="刷新资产库"><i class="fas fa-sync-alt"></i></button>
+                            <input id="editAssetSearch" placeholder="筛选资产..." style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                         </div>
-                        <div id="editAssetCatalog" style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">资产库加载中...</div>
-                        <div id="editAssetList" style="margin-top: 0.6rem; font-size: 0.75rem; color: #94a3b8;"></div>
+                        <div id="uploadAssetForm" style="display: none; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; background: #0f172a; margin-bottom: 0.75rem;">
+                            <div style="display: grid; gap: 0.55rem;">
+                                <input id="uploadAssetName" placeholder="资产名称" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <input id="uploadAssetType" placeholder="类型（设施、建筑、植被、道路...）" value="设施" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <input id="uploadAssetIcon" placeholder="Font Awesome 图标名" value="fa-cube" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button class="small-btn" id="confirmUploadBtn"><i class="fas fa-check"></i> 确认上传</button>
+                                    <button class="small-btn outline" id="cancelUploadBtn">取消</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.35rem;">可用资产（点击添加）</div>
+                        <div id="editAssetCatalog" style="max-height: 240px; overflow-y: auto; margin-bottom: 0.75rem; font-size: 0.78rem; color: #64748b;">资产库加载中...</div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.35rem;">已选资产（点击 × 移除）</div>
+                        <div id="editAssetList" style="font-size: 0.75rem; color: #94a3b8;"></div>
                     </div>
 
                     <div id="editTab_render" style="margin-top: 0.9rem; display: none;">
@@ -240,11 +254,6 @@ class SceneEditorUI extends BaseRoleUI {
             btn.addEventListener('click', () => this.selectTemplatePreset(btn.getAttribute('data-template-preset')));
         });
 
-        // road type change → show/hide manual layout + image tools
-        document.getElementById('generateRoadType')?.addEventListener('change', e => this.handleRoadTypeChange(e));
-        document.getElementById('generateImageInput')?.addEventListener('change', e => this.handleGenerateImageChange(e));
-        document.getElementById('generateExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
-
         // edit tab
         document.getElementById('editCityBtn')?.addEventListener('click', () => this.editCity());
         document.querySelectorAll('[data-edit-cmd]').forEach(btn => {
@@ -255,10 +264,17 @@ class SceneEditorUI extends BaseRoleUI {
         document.getElementById('applyTemplateBtn')?.addEventListener('click', () => this.applyTemplate());
         document.getElementById('executeAIInstructionBtn')?.addEventListener('click', () => this.executeAIInstruction());
 
-        document.getElementById('editAssetAddBtn')?.addEventListener('click', () => this.addEditAsset());
-        document.getElementById('editAssetSearch')?.addEventListener('keydown', e => {
-            if (e.key === 'Enter') this.addEditAsset();
-        });
+        // road type change → show/hide manual layout + image tools
+        document.getElementById('generateRoadType')?.addEventListener('change', e => this.handleRoadTypeChange(e));
+        document.getElementById('generateImageInput')?.addEventListener('change', e => this.handleGenerateImageChange(e));
+        document.getElementById('generateExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
+
+        document.getElementById('uploadAssetBtn')?.addEventListener('click', () => this.toggleUploadForm());
+        document.getElementById('confirmUploadBtn')?.addEventListener('click', () => this.confirmUploadAsset());
+        document.getElementById('cancelUploadBtn')?.addEventListener('click', () => this.toggleUploadForm(false));
+        document.getElementById('refreshAssetsBtn')?.addEventListener('click', () => this.refreshAssets());
+        document.getElementById('editAssetSearch')?.addEventListener('input', () => this.filterAssetCatalog());
+        document.getElementById('editAssetCatalog')?.addEventListener('click', e => this.addAssetFromCatalog(e));
         document.getElementById('editAssetList')?.addEventListener('click', e => this.removeAssetFromClick(e));
 
         document.getElementById('renderSceneBtn')?.addEventListener('click', () => this.startRender());
@@ -274,7 +290,6 @@ class SceneEditorUI extends BaseRoleUI {
             new AuthManager().logout();
             window.location.href = 'index.html';
         });
-
         // init road type state
         const roadTypeSel = document.getElementById('generateRoadType');
         if (roadTypeSel) this.handleRoadTypeChange({ target: roadTypeSel });
@@ -379,59 +394,118 @@ class SceneEditorUI extends BaseRoleUI {
     }
 
     collectGenerationParams() {
-        const manualVertices = document.getElementById('manualVertices')?.value.trim() || '';
-        const manualEdges = document.getElementById('manualEdges')?.value.trim() || '';
-        let roadType = document.getElementById('generateRoadType')?.value || '';
-        if (manualVertices && manualEdges) {
-            roadType = '4';
-        }
+        const manualVertices = document.getElementById('generateManualVertices')?.value.trim() || '';
+        const manualEdges = document.getElementById('generateManualEdges')?.value.trim() || '';
 
         return {
             scene_id: this.scene.id || null,
             city_name: document.getElementById('editSceneName')?.value.trim() || this.scene.name || '',
             description: document.getElementById('generateDescription')?.value.trim() || '',
+            template_id: document.getElementById('editTemplateId')?.value.trim() || '',
             road_type: document.getElementById('generateRoadType')?.value || '2',
             weather: document.getElementById('generateWeather')?.value || '',
-            manual_vertices: document.getElementById('generateManualVertices')?.value.trim() || '',
-            manual_edges: document.getElementById('generateManualEdges')?.value.trim() || ''
+            manual_vertices: manualVertices,
+            manual_edges: manualEdges,
+            style: document.getElementById('generateStyle')?.value.trim() || 'default',
+            scale: Number(document.getElementById('generateScale')?.value || 1),
+            selected_assets: this.editAssets.map(a => this.assetPayload(a))
         };
     }
 
     async generateScene() {
         const button = document.getElementById('generateSceneBtn');
-        const status = document.getElementById('generationStatus');
+        const statusEl = document.getElementById('generationStatus');
         const download = document.getElementById('blendDownloadLink');
         const params = this.collectGenerationParams();
-        if (!params.description) {
-            this.showMessage('请填写自然语言描述', 'error');
+        if (!params.description && !params.template_id) {
+            this.showMessage('请填写描述或模板 ID', 'error');
             return;
         }
 
         this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 生成中');
         if (download) download.style.display = 'none';
-        this.setGenerationStatus('任务已提交，等待 Blender 返回状态...', 'task');
+        this.setGenerationStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
 
         try {
-            await this.blenderBridge.generateScene(params, {
-                onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
-                onComplete: task => {
-                    this.lastDownloadUrl = task.absolute_download_url;
-                    this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
-                    if (download && this.lastDownloadUrl) {
-                        download.href = this.lastDownloadUrl;
-                        download.style.display = 'inline-flex';
-                    }
-                },
-                onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
+            // 优先调用后端 API
+            const result = await this.apiRequest('/blender/generate', {
+                method: 'POST',
+                body: JSON.stringify(params)
             });
+
+            if (!result || result.detail) {
+                throw new Error(result?.detail || '后端不可用');
+            }
+
+            const taskId = result.task_id;
+            const downloadUrl = result.download_url;
+            this.setGenerationStatus(`任务 ${taskId} 已启动，轮询状态中...`, 'task');
+
+            // 轮询状态（2s 间隔，最多 120s）
+            await this._pollTaskStatus(taskId, downloadUrl, download);
             this.showMessage('SCGS 生成完成', 'info');
         } catch (error) {
-            this.setGenerationStatus(error.message || '生成失败', 'error');
-            this.showMessage('SCGS 生成失败', 'error');
+            // 后端不可用时降级到 blenderBridge
+            if (this.blenderBridge) {
+                this.setGenerationStatus('后端不可用，尝试本地 Blender 桥接...', 'task');
+                try {
+                    await this.blenderBridge.generateScene(params, {
+                        onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
+                        onComplete: task => {
+                            this.lastDownloadUrl = task.absolute_download_url;
+                            this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
+                            if (download && this.lastDownloadUrl) {
+                                download.href = this.lastDownloadUrl;
+                                download.style.display = 'inline-flex';
+                            }
+                        },
+                        onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
+                    });
+                    this.showMessage('SCGS 生成完成（本地桥接）', 'info');
+                } catch (bridgeError) {
+                    this.setGenerationStatus(bridgeError.message || '生成失败', 'error');
+                    this.showMessage('SCGS 生成失败', 'error');
+                }
+            } else {
+                this.setGenerationStatus(error.message || '生成失败', 'error');
+                this.showMessage('SCGS 生成失败', 'error');
+            }
         } finally {
             this.setButtonBusy(button, false);
-            if (status) status.style.display = 'block';
+            if (statusEl) statusEl.style.display = 'block';
         }
+    }
+
+    async _pollTaskStatus(taskId, downloadUrl, downloadEl, intervalMs = 2000, maxRetries = 60) {
+        for (let i = 0; i < maxRetries; i++) {
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+
+            const statusData = await this.apiRequest(`/blender/status/${taskId}`);
+            if (!statusData) {
+                this.setGenerationStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
+                continue;
+            }
+
+            const taskStatus = statusData.status;
+            if (taskStatus === 'completed') {
+                this.lastDownloadUrl = statusData.download_url || downloadUrl;
+                this.setGenerationStatus(`生成完成。Task ID: ${taskId}`, 'success');
+                if (downloadEl && this.lastDownloadUrl) {
+                    downloadEl.href = this.lastDownloadUrl;
+                    downloadEl.style.display = 'inline-flex';
+                }
+                return;
+            }
+
+            if (taskStatus === 'failed') {
+                throw new Error(statusData.error || '任务执行失败');
+            }
+
+            // 仍在 processing
+            const warnings = statusData.warnings?.length ? ` ⚠${statusData.warnings.length}` : '';
+            this.setGenerationStatus(`任务 ${taskId} 处理中…（第 ${i + 1} 次轮询）${warnings}`, 'task');
+        }
+        throw new Error(`任务 ${taskId} 超时：轮询 ${maxRetries} 次后仍未完成`);
     }
 
     async runDiagnostics() {
@@ -443,9 +517,9 @@ class SceneEditorUI extends BaseRoleUI {
         if (summary) summary.textContent = '正在启动 Blender 进行诊断...';
         if (output) output.textContent = '';
 
-        try {
-            const data = await this.blenderBridge.diagnostics();
+        const renderDiagnostics = (data, source = '') => {
             const ok = data.blender_started && !data.error;
+            const sourceLabel = source ? ` [${source}]` : '';
             if (summary) {
                 summary.style.color = ok ? '#10b981' : '#f87171';
                 summary.textContent = [
@@ -453,13 +527,30 @@ class SceneEditorUI extends BaseRoleUI {
                     `Started: ${data.blender_started ? 'yes' : 'no'}`,
                     `Plugin enabled: ${data.plugin_enabled ? 'yes' : 'no'}`,
                     `Operators: ${(data.operators || []).length}`
-                ].join(' | ');
+                ].join(' | ') + sourceLabel;
             }
             if (output) output.textContent = JSON.stringify(data, null, 2);
-        } catch (error) {
-            if (summary) {
-                summary.style.color = '#f87171';
-                summary.textContent = error.message || '诊断失败';
+        };
+
+        try {
+            // 优先调用后端诊断 API
+            const backendData = await this.apiRequest('/blender/diagnostics');
+            if (backendData && !backendData.detail) {
+                renderDiagnostics(backendData, 'backend');
+                return;
+            }
+            throw new Error('后端返回异常');
+        } catch {
+            // 降级到本地 Blender 桥接
+            if (summary) summary.textContent = '后端不可用，尝试本地 Blender 桥接...';
+            try {
+                const data = await this.blenderBridge.diagnostics();
+                renderDiagnostics(data, 'local bridge');
+            } catch (bridgeError) {
+                if (summary) {
+                    summary.style.color = '#f87171';
+                    summary.textContent = bridgeError.message || '诊断失败';
+                }
             }
         } finally {
             this.setButtonBusy(button, false);
@@ -565,6 +656,7 @@ class SceneEditorUI extends BaseRoleUI {
         }
         this.editAssets.push(asset);
         this.renderEditAssets();
+        this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
         this.blenderBridge?.addAsset(asset.plugin_type || asset.type || 'model', asset.plugin_name || asset.name);
         this.showMessage('资产已选择并加入生成参数', 'info');
     }
@@ -578,6 +670,54 @@ class SceneEditorUI extends BaseRoleUI {
         if (Number.isNaN(index)) return;
         this.editAssets.splice(index, 1);
         this.renderEditAssets();
+        this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
+    }
+
+    toggleUploadForm(show = true) {
+        const form = document.getElementById('uploadAssetForm');
+        if (form) form.style.display = show ? 'block' : 'none';
+    }
+
+    async confirmUploadAsset() {
+        const nameInput = document.getElementById('uploadAssetName');
+        const typeInput = document.getElementById('uploadAssetType');
+        const iconInput = document.getElementById('uploadAssetIcon');
+        const assetName = nameInput?.value.trim();
+        if (!assetName) {
+            this.showMessage('请输入资产名称', 'error');
+            return;
+        }
+        const assetType = typeInput?.value.trim() || '设施';
+        const assetIcon = iconInput?.value.trim() || 'fa-cube';
+
+        try {
+            const response = await this.apiRequest('/modeler/assets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify({
+                    name: assetName,
+                    type: assetType,
+                    icon: assetIcon
+                })
+            });
+            if (response && response.asset) {
+                this.availableAssets.unshift(response.asset);
+                this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
+                if (nameInput) nameInput.value = '';
+                if (typeInput) typeInput.value = '设施';
+                if (iconInput) iconInput.value = 'fa-cube';
+                this.toggleUploadForm(false);
+                this.showMessage(`资产「${assetName}」已创建`, 'success');
+            } else {
+                this.showMessage(response?.detail || '资产创建失败', 'error');
+            }
+        } catch (error) {
+            console.error('Asset upload failed', error);
+            this.showMessage('资产创建失败', 'error');
+        }
     }
 
     startRender() {
@@ -673,18 +813,7 @@ class SceneEditorUI extends BaseRoleUI {
             const response = await this.apiRequest('/modeler/assets', { method: 'GET' });
             if (response && !response.detail) {
                 this.availableAssets = Array.isArray(response) ? response : [];
-                if (catalog) {
-                    if (this.availableAssets.length === 0) {
-                        catalog.textContent = '资产库为空，可在建模师页面新增资产。';
-                        return;
-                    }
-                    catalog.innerHTML = this.availableAssets.map(asset => (
-                        `<button type="button" class="scene-asset-tag" data-asset-id="${this.escapeHTML(asset.id)}" style="margin-right: 0.35rem; cursor: pointer;">
-                            <i class="fas ${asset.icon || 'fa-cube'}"></i>
-                            ${this.escapeHTML(asset.name)}
-                        </button>`
-                    )).join('');
-                }
+                this.renderAssetCatalog();
             } else if (catalog) {
                 catalog.textContent = response?.detail || '资产库加载失败';
             }
@@ -692,6 +821,50 @@ class SceneEditorUI extends BaseRoleUI {
             console.error('加载资产库失败', error);
             if (catalog) catalog.textContent = '资产库加载失败';
         }
+    }
+
+    renderAssetCatalog(filterText = '') {
+        const catalog = document.getElementById('editAssetCatalog');
+        if (!catalog) return;
+        if (this.availableAssets.length === 0) {
+            catalog.innerHTML = '<div style="color: #64748b; padding: 0.5rem;">资产库为空，可点击「上传资产」新增。</div>';
+            return;
+        }
+        const lowerFilter = filterText.toLowerCase();
+        const filtered = lowerFilter
+            ? this.availableAssets.filter(a =>
+                (a.name || '').toLowerCase().includes(lowerFilter) ||
+                (a.plugin_name || '').toLowerCase().includes(lowerFilter) ||
+                (a.type || '').toLowerCase().includes(lowerFilter))
+            : this.availableAssets;
+        if (filtered.length === 0) {
+            catalog.innerHTML = '<div style="color: #64748b; padding: 0.5rem;">无匹配资产</div>';
+            return;
+        }
+        const addedIds = new Set(this.editAssets.map(a => String(a.id)));
+        catalog.innerHTML = filtered.map(asset => {
+            const alreadyAdded = addedIds.has(String(asset.id));
+            return `<div class="asset-catalog-row" data-asset-id="${this.escapeHTML(asset.id)}" style="display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.6rem; border-radius: 0.35rem; cursor: ${alreadyAdded ? 'default' : 'pointer'}; transition: background 0.15s; ${alreadyAdded ? 'opacity: 0.5;' : ''} border-bottom: 1px solid #1e293b;">
+                <span style="flex: 1; min-width: 0;">
+                    <i class="fas ${asset.icon || 'fa-cube'}" style="color: #38bdf8; width: 1.2rem; text-align: center;"></i>
+                    <span style="color: #e2e8f0;">${this.escapeHTML(asset.name)}</span>
+                    <span style="color: #64748b; font-size: 0.68rem; margin-left: 0.35rem;">${this.escapeHTML(asset.type || asset.plugin_type || '')}</span>
+                </span>
+                ${alreadyAdded
+                    ? '<span style="color: #22c55e; font-size: 0.7rem;">已添加</span>'
+                    : '<i class="fas fa-plus-circle" style="color: #38bdf8; flex-shrink: 0;"></i>'}
+            </div>`;
+        }).join('');
+    }
+
+    filterAssetCatalog() {
+        const input = document.getElementById('editAssetSearch');
+        this.renderAssetCatalog(input?.value || '');
+    }
+
+    async refreshAssets() {
+        await this.loadAvailableAssets();
+        this.showMessage('资产库已刷新', 'info');
     }
 
     findAssetByName(name) {

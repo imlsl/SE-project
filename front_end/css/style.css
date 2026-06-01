@@ -297,6 +297,10 @@ body {
     color: #f87171;
 }
 
+.asset-catalog-row:hover {
+    background: rgba(56, 189, 248, 0.08) !important;
+}
+
 .function-grid {
     display: flex;
     flex-wrap: wrap;
