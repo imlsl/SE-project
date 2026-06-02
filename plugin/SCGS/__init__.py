@@ -3026,14 +3026,336 @@ import bmesh
 from SCGS.weather import *
 import json
 import re
+import regex
 import numpy as np
+import openai
 import os
 import ast
+
+## 添加的部分！！
+ADDON_DIR = os.path.dirname(os.path.abspath(__file__))
+CUSTOM_TEX_BLEND = r"C:\Program Files\Blender Foundation\Blender 4.1\4.1\scripts\addons\SCGS\custom_assets\myroad.blend"
+CUSTOM_TEX_NAME = "路面材质" 
+
+
+# ---------------- SCGS 生态化场景扩展：山峦 / 湖水 / 河流 / 动态船只 ----------------
+def scgs_get_or_create_collection(name):
+    """获取或创建集合，避免生态对象散落在场景根集合。"""
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        coll = bpy.data.collections.new(name)
+        bpy.context.scene.collection.children.link(coll)
+    return coll
+
+
+def scgs_link_object_to_collection(obj, collection):
+    if obj.name not in collection.objects:
+        collection.objects.link(obj)
+    return obj
+
+
+def scgs_create_principled_mat(name, color, roughness=0.55, metallic=0.0, alpha=1.0):
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = color
+        bsdf.inputs["Roughness"].default_value = roughness
+        bsdf.inputs["Metallic"].default_value = metallic
+        bsdf.inputs["Alpha"].default_value = alpha
+    mat.diffuse_color = color
+    if alpha < 1.0:
+        mat.blend_method = 'BLEND'
+        mat.use_screen_refraction = True
+        mat.show_transparent_back = True
+    return mat
+
+
+def scgs_create_mountain_ring(collection, radius=360, segments=96, height=85, noise_strength=0.42):
+    """在城市外围创建一圈低多边形山峦。"""
+    name = "SCGS_Eco_Mountain_Ring"
+    old = bpy.data.objects.get(name)
+    if old:
+        return old
+    verts, faces = [], []
+    import math, random
+    random.seed(42)
+    for i in range(segments):
+        angle = 2 * math.pi * i / segments
+        wave = 1.0 + 0.12 * math.sin(i * 0.7) + random.uniform(-noise_strength, noise_strength) * 0.08
+        outer = radius * wave
+        inner = radius * 0.78 * (1.0 + 0.06 * math.sin(i * 1.3))
+        peak = radius * 0.89 * (1.0 + 0.09 * math.cos(i * 0.9))
+        verts.append((outer * math.cos(angle), outer * math.sin(angle), -2))
+        verts.append((inner * math.cos(angle), inner * math.sin(angle), 0))
+        verts.append((peak * math.cos(angle), peak * math.sin(angle), height * (0.55 + random.random() * 0.75)))
+    for i in range(segments):
+        j = (i + 1) % segments
+        faces.append((i*3, j*3, j*3+2, i*3+2))
+        faces.append((i*3+1, i*3+2, j*3+2, j*3+1))
+    mesh = bpy.data.meshes.new(name + "Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(scgs_create_principled_mat("SCGS_Mountain_Material", (0.18, 0.30, 0.16, 1), 0.9))
+    scgs_link_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_lake(collection, center=(280, 250, -0.15), radius_x=100, radius_y=70, segments=96):
+    """创建椭圆湖面。"""
+    name = "SCGS_Eco_Lake"
+    old = bpy.data.objects.get(name)
+    if old:
+        return old
+    import math
+
+    verts = [center]
+    for i in range(segments):
+        a = 2 * math.pi * i / segments
+        verts.append((center[0] + radius_x * math.cos(a), center[1] + radius_y * math.sin(a), center[2]))
+
+    faces = []
+    for i in range(1, segments + 1):
+        next_i = 1 if i == segments else i + 1
+        faces.append((0, i, next_i))
+
+    mesh = bpy.data.meshes.new(name + "Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(scgs_create_principled_mat("SCGS_Lake_Water_Material", (0.05, 0.32, 0.55, 0.62), 0.2, 0.0, 0.62))
+    scgs_link_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_river(collection):
+    """创建一条贴近地面的平面河流，沿山脚蜿蜒并流入湖泊。"""
+    name = "SCGS_Eco_River"
+    old = bpy.data.objects.get(name)
+    if old:
+        return old
+
+    import math
+
+    # 绕山脚，最后接近湖泊
+    pts = [
+
+    (-80, -317, -0.06),
+    (-55, -336, -0.06),
+    (-30, -326, -0.06),
+    (22, -392, -0.06),
+    (50, -391, -0.06),
+    (79, -395, -0.06),
+    (95, -352, -0.06),
+    (133, -281, -0.06),
+    (164, -283, -0.06),
+    (243, -320, -0.06),
+    (263, -296, -0.06),
+    (283, -250, -0.06),
+    (264, -195, -0.06),
+    (267, -153, -0.06),
+    (380, -129, -0.06),
+    (392, -78, -0.06),
+    (338, -21, -0.06),
+    (363, 0, -0.06),
+    (403, 53, -0.06),
+    (400, 78, -0.06),
+    (306, 113, -0.06),
+    (312, 130, -0.06),
+    (305, 153, -0.06),
+    (290, 164, -0.06),
+    (309, 225, -0.06)
+
+    ]
+    river_width = 8
+
+    verts = []
+    faces = []
+
+    for i, p in enumerate(pts):
+        if i == 0:
+            dx = pts[i + 1][0] - p[0]
+            dy = pts[i + 1][1] - p[1]
+        elif i == len(pts) - 1:
+            dx = p[0] - pts[i - 1][0]
+            dy = p[1] - pts[i - 1][1]
+        else:
+            dx = pts[i + 1][0] - pts[i - 1][0]
+            dy = pts[i + 1][1] - pts[i - 1][1]
+
+        length = math.sqrt(dx * dx + dy * dy)
+        if length == 0:
+            nx, ny = 0, 0
+        else:
+            nx = -dy / length
+            ny = dx / length
+
+        verts.append((p[0] + nx * river_width, p[1] + ny * river_width, p[2]))
+        verts.append((p[0] - nx * river_width, p[1] - ny * river_width, p[2]))
+
+    for i in range(len(pts) - 1):
+        faces.append((i * 2, i * 2 + 1, i * 2 + 3, i * 2 + 2))
+
+    mesh = bpy.data.meshes.new(name + "Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(
+        scgs_create_principled_mat(
+            "SCGS_River_Water_Material",
+            (0.04, 0.26, 0.48, 0.68),
+            0.25,
+            0.0,
+            0.68
+        )
+    )
+
+    scgs_link_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_append_custom_boat_if_exists(collection, location):
+    """优先加载 custom_assets/myboat.blend 中的 Boat/船 物体；没有则返回 None 使用程序化船。"""
+    boat_file = os.path.join(ADDON_DIR, "custom_assets", "myboat.blend")
+    if not os.path.exists(boat_file):
+        return None
+    try:
+        with bpy.data.libraries.load(boat_file, link=False) as (data_from, data_to):
+            candidates = [n for n in data_from.objects if n.lower() in {"boat", "scgs_boat", "船", "小船"} or "boat" in n.lower() or "船" in n]
+            if not candidates:
+                return None
+            data_to.objects = [candidates[0]]
+        obj = bpy.data.objects.get(candidates[0])
+        if obj:
+            obj.name = "SCGS_Eco_Boat"
+            obj.location = location
+            scgs_link_object_to_collection(obj, collection)
+            return obj
+    except Exception as exc:
+        print(f"加载自定义船只失败，改用程序化船只: {exc}")
+    return None
+
+
+def scgs_create_procedural_boat(collection):
+
+    # 船体
+    bpy.ops.mesh.primitive_cube_add(location=(280, 250, 0.25))
+    boat = bpy.context.active_object
+    boat.name = "SCGS_Boat"
+
+    boat.scale = (2.8, 1.0, 0.45)
+
+    # 前后收窄，更像船
+    mod = boat.modifiers.new(name="Bevel", type='BEVEL')
+    mod.width = 0.08
+    mod.segments = 3
+
+    bpy.ops.object.shade_smooth()
+
+    # 船体材质
+    mat = bpy.data.materials.new(name="Boat_Mat")
+    mat.use_nodes = True
+
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = (0.15, 0.15, 0.18, 1)
+        bsdf.inputs["Roughness"].default_value = 0.6
+
+    boat.data.materials.append(mat)
+
+    # 船舱
+    bpy.ops.mesh.primitive_cube_add(location=(280, 250, 0.75))
+    cabin = bpy.context.active_object
+    cabin.scale = (0.9, 0.55, 0.35)
+
+    cabin_mat = bpy.data.materials.new(name="Cabin_Mat")
+    cabin_mat.use_nodes = True
+
+    bsdf2 = next((n for n in cabin_mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if bsdf2:
+        bsdf2.inputs["Base Color"].default_value = (0.8, 0.8, 0.85, 1)
+        cabin.data.materials.append(cabin_mat)
+
+    # 合并
+    bpy.ops.object.select_all(action='DESELECT')
+    boat.select_set(True)
+    cabin.select_set(True)
+
+    bpy.context.view_layer.objects.active = boat
+    bpy.ops.object.join()
+
+    collection.objects.link(boat)
+
+    return boat
+
+
+def scgs_animate_boat(boat, lake_center=(280, 250, 1.1), radius_x=70, radius_y=38):
+    import math
+
+    # 右边 1/3
+    angle_start = -math.pi / 3
+    angle_end = math.pi / 3
+
+    for frame, angle in [(1, angle_start), (80, (angle_start+angle_end)/2), (160, angle_end)]:
+        boat.location = (
+            lake_center[0] + radius_x * math.cos(angle),
+            lake_center[1] + radius_y * math.sin(angle),
+            lake_center[2]
+        )
+        boat.rotation_euler[2] = angle + math.pi / 2
+        boat.keyframe_insert(data_path="location", frame=frame)
+        boat.keyframe_insert(data_path="rotation_euler", frame=frame)
+        
+    if boat.animation_data and boat.animation_data.action:
+        for fc in boat.animation_data.action.fcurves:
+            for kp in fc.keyframe_points:
+                kp.interpolation = 'LINEAR'
+    return boat
+
+def scgs_clear_old_ecology():
+    for obj in list(bpy.data.objects):
+        if obj.name.startswith("SCGS_Boat") or obj.name.startswith("SCGS_Eco_"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+def scgs_generate_ecology_scene():
+    """生成城市周边生态化元素，可被城市生成和编辑流程复用。"""
+    scgs_clear_old_ecology()
+    coll = scgs_get_or_create_collection("SCGS_Ecology")
+    mountain = scgs_create_mountain_ring(coll)
+    lake = scgs_create_lake(coll)
+    river = scgs_create_river(coll)
+    boat = scgs_create_procedural_boat(coll)
+    scgs_animate_boat(boat)
+    print("SCGS生态化场景已生成：山峦、湖水、河流、动态船只")
+    return {"mountain": mountain, "lake": lake, "river": river, "boat": boat}
+
+
+
 os.environ["http_proxy"] = "http://localhost:7890"
 os.environ["https_proxy"] = "http://localhost:7890"
 
 from SCGS.dashscope_client import chat_completions_content
 
+class SNA_OT_Generate_Ecology_9F2A1(bpy.types.Operator):
+    bl_idname = "sna.generate_ecology_9f2a1"
+    bl_label = "Generate Ecology Scene"
+    bl_description = "Generate mountains, lake, river and animated boats around the current city"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        if bpy.app.version >= (3, 0, 0):
+            cls.poll_message_set('')
+        return True
+
+    def execute(self, context):
+        scgs_generate_ecology_scene()
+        return {"FINISHED"}
+
+    def invoke(self, context, event):
+        return self.execute(context)
 
 
 class SNA_OT_City_Generation(bpy.types.Operator):
@@ -3604,6 +3926,28 @@ class SNA_OT_City_Generation(bpy.types.Operator):
         load_start_template(startfile)
         bpy.ops.sna.edit_city_d7cab()
 
+
+
+        #将自定义材质添加到ICity_Materials!!!
+        custom_tex_name = "路面材质"
+        if custom_tex_name in bpy.data.materials:
+            mat = bpy.data.materials[custom_tex_name]
+            target_obj = bpy.data.objects.get("ICity_Materials")
+            if target_obj:
+                existing_mats = [slot.material.name for slot in target_obj.material_slots if slot.material]
+                if mat.name not in existing_mats:
+                    target_obj.data.materials.append(mat)
+                    print(f"已将材质 '{mat.name}' 挂载到 ICity_Materials")
+                else:
+                    print(f"材质 '{mat.name}' 已存在于 ICity_Materials 中")
+            else:
+                print("警告: 未找到 ICity_Materials 对象")
+        else:
+            print("警告: 自定义材质尚未导入，请检查导入逻辑")
+
+
+
+
         # 清除初始加载的内容 切记不能直接删除点 要调用函数 否则的话没办法在地块上生成城市
         bpy.ops.mesh.select_all(action='SELECT')
         bpy.context.scene.sna_citystreet = 'Road'
@@ -3636,23 +3980,6 @@ class SNA_OT_City_Generation(bpy.types.Operator):
         bpy.ops.sna.road_materials_filter_6a3ec()
         bpy.context.scene.sna_road_materials_browser = Texture_Sidewalk
         bpy.ops.sna.road_apply_5c3ab()
-
-        # 将自定义路面材质挂载到 ICity_Materials（使材质可在资产列表中被选择）
-        custom_tex_name = "路面材质"
-        if custom_tex_name in bpy.data.materials:
-            mat = bpy.data.materials[custom_tex_name]
-            target_obj = bpy.data.objects.get("ICity_Materials")
-            if target_obj:
-                existing_mats = [slot.material.name for slot in target_obj.material_slots if slot.material]
-                if mat.name not in existing_mats:
-                    target_obj.data.materials.append(mat)
-                    print(f"[custom_asset] 已将材质 '{mat.name}' 挂载到 ICity_Materials")
-                else:
-                    print(f"[custom_asset] 材质 '{mat.name}' 已存在于 ICity_Materials 中")
-            else:
-                print("[custom_asset] 警告: 未找到 ICity_Materials 对象")
-        else:
-            print("[custom_asset] 警告: 自定义路面材质未导入")
 
         # 树
         bpy.context.scene.sna_street_asset_type = 'Tree'
@@ -3811,6 +4138,11 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             bpy.ops.sna.road_materials_filter_6a3ec()
             bpy.context.scene.sna_street_asset_type = 'Imperfection'
             bpy.data.node_groups["Road 2"].nodes["Group.013"].inputs[2].default_value = 0
+        
+        # 刷新材质浏览器，让新材质出现在 UI 中
+        bpy.ops.sna.material_filter_f04c3()
+        bpy.ops.sna.road_materials_filter_6a3ec()
+
 
     @classmethod
     def poll(cls, context):
@@ -4072,6 +4404,10 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             self.snow_weather(collection, snow_ground_loaction, snow_ground_dimensions, density, thickness, snow_loaction,snow_scale)
 
 
+
+        # 第二个任务：生成城市周边生态化场景，并让湖面船只产生关键帧动画。
+        scgs_clear_old_ecology()
+        scgs_generate_ecology_scene()
 
         print(context.scene.sna_road_type)
         print(context.scene.sna_description)
@@ -4727,7 +5063,6 @@ class SNA_OT_SelectImage(bpy.types.Operator):
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
-
 class SNA_OT_ExtractLayout(bpy.types.Operator):
     """从所选图像提取道路布局并填入手动布局字段"""
     bl_idname = "sna.extract_layout"
@@ -5105,6 +5440,7 @@ def register():
     bpy.utils.register_class(SNA_OT_Filter_Street_Assets_C5C0E)
     bpy.utils.register_class(SNA_PT_ICITY_EDITOR_6D34D)
     bpy.utils.register_class(SNA_OT_City_Generation)
+    bpy.utils.register_class(SNA_OT_Generate_Ecology_9F2A1)
     kc = bpy.context.window_manager.keyconfigs.addon
     km = kc.keymaps.new(name='Window', space_type='EMPTY')
     kmi = km.keymap_items.new('sna.open_addon_prefrences_34afe', 'M', 'PRESS',
@@ -5225,6 +5561,7 @@ def unregister():
     bpy.utils.unregister_class(SNA_OT_Landscape_Filter_0Bf89)
     bpy.utils.unregister_class(SNA_OT_Filter_Street_Assets_C5C0E)
     bpy.utils.unregister_class(SNA_PT_ICITY_EDITOR_6D34D)
+    bpy.utils.unregister_class(SNA_OT_Generate_Ecology_9F2A1)
     bpy.utils.unregister_class(SNA_OT_City_Generation)
 
 
