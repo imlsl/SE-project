@@ -88,6 +88,7 @@ class GeneratedReportResponse(BaseModel):
     generated_at: str
     download_url: str
     summary: str
+    message: Optional[str] = None
 
 class DataExportResponse(BaseModel):
     export_id: str

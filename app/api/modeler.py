@@ -161,12 +161,12 @@ async def update_scene(
     """更新场景名称或发布状态。"""
     scene = db.query(DBScene).filter(DBScene.id == scene_id, DBScene.owner_id == current_user.id).first()
     if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found or permission denied")
+        raise HTTPException(status_code=404, detail="场景不存在或无权修改")
     if request.name:
         scene.name = request.name
     if request.status:
         if request.status not in {"draft", "published"}:
-            raise HTTPException(status_code=400, detail="Scene status must be draft or published")
+            raise HTTPException(status_code=400, detail="场景状态仅支持 draft 或 published")
         scene.status = request.status
     scene.last_modified = datetime.utcnow()
     db.commit()
@@ -188,11 +188,11 @@ async def delete_scene(
     """删除场景"""
     scene = db.query(DBScene).filter(DBScene.id == scene_id, DBScene.owner_id == current_user.id).first()
     if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found or permission denied")
+        raise HTTPException(status_code=404, detail="场景不存在或无权修改")
 
     db.delete(scene)
     db.commit()
-    return {"message": "Scene deleted successfully"}
+    return {"message": "场景已成功删除"}
 
 
 @router.post("/blender/llm-command")
@@ -251,7 +251,7 @@ async def apply_layout(
 ):
     """接收前端点集布局，返回可交给 Blender 的道路/节点参数。"""
     if len(request.points) < 2:
-        raise HTTPException(status_code=400, detail="Layout requires at least two points")
+        raise HTTPException(status_code=400, detail="布局至少需要两个点")
 
     manual_vertices = ",".join(f"({point.x},{point.y},0)" for point in request.points)
     manual_edges = ",".join(f"({idx},{idx + 1})" for idx in range(len(request.points) - 1))
