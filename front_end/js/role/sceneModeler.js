@@ -26,7 +26,10 @@ class SceneModelerUI extends BaseRoleUI {
                         <span style="font-size: 0.8rem; margin-left: auto; color: #38bdf8;">${this.username}</span>
                     </div>
                     <p style="color: #94a3b8; margin-bottom: 1rem;">3D场景设计 | 资产库管理 | 实时渲染</p>
-                    
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <button class="small-btn outline" id="modelerDiagBtn"><i class="fas fa-stethoscope"></i> Blender 诊断</button>
+                    </div>
+
                     <div class="stats-grid" id="statsGrid">
                         ${this.createStatCard('我的场景', this.scenes.length, 'fas fa-layer-group', '#38bdf8')}
                         ${this.createStatCard('资产总数', this.assets.length, 'fas fa-cubes', '#a78bfa')}
@@ -224,9 +227,58 @@ class SceneModelerUI extends BaseRoleUI {
         }
         
         
+        // Blender 诊断
+        const diagBtn = document.getElementById('modelerDiagBtn');
+        if (diagBtn) {
+            diagBtn.addEventListener('click', () => this.runModelerDiagnostics());
+        }
+
         this.bindAssetEvents();
-        
+
         this.bindSceneEvents();
+    }
+
+    async runModelerDiagnostics() {
+        const button = document.getElementById('modelerDiagBtn');
+        this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 诊断中');
+
+        try {
+            const data = await this.apiRequest('/blender/diagnostics');
+            if (data && !data.detail) {
+                const ok = data.blender_started && !data.error;
+                const lines = [
+                    `Blender: ${data.blender_found ? '已找到' : '未找到'}`,
+                    `启动: ${data.blender_started ? '成功' : '失败'}`,
+                    `SCGS 插件: ${data.plugin_enabled ? '已启用' : '未启用'}`,
+                    `可用算子: ${(data.operators || []).length} 个`
+                ];
+                if (data.error) lines.push(`错误: ${data.error}`);
+                alert(`Blender 诊断结果 [后端]\n\n${lines.join('\n')}`);
+                this.showMessage('Blender 诊断完成', 'info');
+            } else {
+                throw new Error(data?.detail || '后端返回异常');
+            }
+        } catch {
+            // fallback to blenderBridge
+            if (this.blenderBridge) {
+                try {
+                    const data = await this.blenderBridge.diagnostics();
+                    const ok = data.blender_started && !data.error;
+                    alert(`Blender 诊断结果 [本地桥接]\n\n` +
+                        `Blender: ${data.blender_found ? 'found' : 'missing'}\n` +
+                        `Started: ${data.blender_started ? 'yes' : 'no'}\n` +
+                        `Plugin: ${data.plugin_enabled ? 'yes' : 'no'}\n` +
+                        `Operators: ${(data.operators || []).length}`);
+                    this.showMessage('Blender 诊断完成（本地桥接）', 'info');
+                } catch (bridgeErr) {
+                    this.showMessage(`诊断失败：${bridgeErr.message || '未知错误'}`, 'error');
+                }
+            } else {
+                this.showMessage('Blender 诊断不可用：后端和本地桥接均无法连接', 'error');
+            }
+        } finally {
+            this.setButtonBusy(button, false);
+        }
     }
 
     refreshStats() {
@@ -244,13 +296,39 @@ class SceneModelerUI extends BaseRoleUI {
         document.querySelectorAll('.asset-item').forEach(item => {
             item.addEventListener('click', () => {
                 const assetName = item.dataset.asset;
+                const asset = this.assets.find(a => a.name === assetName);
+                if (!asset) return;
+
+                // 存入 localStorage，供 scene_edit 页预加载
+                const pending = this._getPendingAssets();
+                const already = pending.find(a => a.name === assetName);
+                if (!already) {
+                    pending.push({
+                        id: asset.id,
+                        name: asset.name,
+                        type: asset.type || asset.plugin_type || 'model',
+                        plugin_type: asset.plugin_type || asset.type || 'model',
+                        plugin_name: asset.plugin_name || asset.name,
+                        icon: asset.icon || 'fa-cube',
+                        material_target: asset.material_target || null
+                    });
+                    localStorage.setItem('smartcity_pending_assets', JSON.stringify(pending));
+                }
+
                 if (this.blenderBridge) {
-                    this.blenderBridge.addAsset('model', assetName);
+                    this.blenderBridge.addAsset(asset.plugin_type || asset.type || 'model', asset.plugin_name || asset.name);
+                    this.showMessage(`资产「${assetName}」已发送至 Blender`, 'info');
                 } else {
-                    this.showMessage('Blender桥接未初始化', 'error');
+                    this.showMessage(`资产「${assetName}」已待选，进入场景编辑器后可使用`, 'info');
                 }
             });
         });
+    }
+
+    _getPendingAssets() {
+        try {
+            return JSON.parse(localStorage.getItem('smartcity_pending_assets') || '[]');
+        } catch { return []; }
     }
 
     bindSceneEvents() {

@@ -44,6 +44,7 @@ class SceneEditorUI extends BaseRoleUI {
         this.renderEditAssets();
         this.blenderBridge?.init('simulateOutput');
         this.loadAvailableAssets();
+        this._loadPendingAssets();
     }
 
     render() {
@@ -659,6 +660,18 @@ class SceneEditorUI extends BaseRoleUI {
         this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
         this.blenderBridge?.addAsset(asset.plugin_type || asset.type || 'model', asset.plugin_name || asset.name);
         this.showMessage('资产已选择并加入生成参数', 'info');
+    }
+
+    _loadPendingAssets() {
+        try {
+            const raw = localStorage.getItem('smartcity_pending_assets');
+            if (!raw) return;
+            const pending = JSON.parse(raw);
+            if (!Array.isArray(pending) || pending.length === 0) return;
+            pending.forEach(asset => this.addAssetToSelection(asset));
+            localStorage.removeItem('smartcity_pending_assets');
+            this.showMessage(`已从建模师导入 ${pending.length} 个待选资产`, 'info');
+        } catch { /* ignore */ }
     }
 
     removeAssetFromClick(event) {
