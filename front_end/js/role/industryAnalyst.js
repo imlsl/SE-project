@@ -173,6 +173,7 @@ class IndustryAnalystUI extends BaseRoleUI {
         if (generateReportBtn) {
             generateReportBtn.addEventListener('click', async () => {
                 this.showMessage('报告生成中...', 'info');
+                const preview = document.getElementById('reportPreview');
                 try {
                     const response = await this.apiRequest('/analyst/reports/generate', {
                         method: 'POST',
@@ -181,12 +182,23 @@ class IndustryAnalystUI extends BaseRoleUI {
                         }
                     });
 
-                    if (response && response.message) {
-                        this.showMessage(response.message, 'info');
+                    if (response && !response.detail) {
+                        if (preview) {
+                            preview.style.display = 'block';
+                            preview.innerHTML = `
+                                <div style="font-size: 0.9rem; color: #38bdf8; font-weight: 500;">${response.title}</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                    报告 ID: ${response.report_id} | 生成时间：${response.generated_at}
+                                </div>
+                                <div style="font-size: 0.82rem; color: #e2e8f0; margin-top: 0.5rem;">${response.summary}</div>
+                                <a class="small-btn outline" style="margin-top: 0.5rem; display: inline-flex; text-decoration: none;" href="http://127.0.0.1:8000${response.download_url}" target="_blank">
+                                    <i class="fas fa-download"></i> 下载报告
+                                </a>
+                            `;
+                        }
+                        this.showMessage('报告已生成', 'info');
                     } else if (response && response.detail) {
                         this.showMessage(response.detail, 'error');
-                    } else {
-                        this.showMessage('报告已提交生成', 'info');
                     }
                 } catch (error) {
                     console.error('报告生成失败:', error);
@@ -210,10 +222,16 @@ class IndustryAnalystUI extends BaseRoleUI {
                     if (response && !response.detail) {
                         const preview = document.getElementById('reportPreview');
                         if (preview) {
+                            const exportData = response.data || {};
                             preview.style.display = 'block';
                             preview.innerHTML = `
                                 <div style="font-size: 0.85rem; color: #e2e8f0;">导出文件：${response.filename}</div>
-                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">生成时间：${response.generated_at}</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                    导出 ID: ${response.export_id} | 生成时间：${response.generated_at}
+                                </div>
+                                <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.4rem;">
+                                    项目数: ${exportData.totalProjects || '-'} | 活跃场景: ${exportData.activeScenes || '-'} | 准确率: ${exportData.accuracy || '-'}
+                                </div>
                                 <a class="small-btn outline" style="margin-top: 0.5rem; display: inline-flex; text-decoration: none;" href="http://127.0.0.1:8000${response.download_url}" target="_blank">
                                     <i class="fas fa-download"></i> 下载数据
                                 </a>
@@ -246,9 +264,19 @@ class IndustryAnalystUI extends BaseRoleUI {
                     if (response && !response.detail) {
                         preview.style.display = 'block';
                         preview.innerHTML = `
-                            <div style="font-size: 0.85rem; color: #e2e8f0;">${response.summary}</div>
-                            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">
-                                ${response.series.map(item => `${item.label}: ${item.value} (${item.change}%)`).join(' | ')}
+                            <div style="font-size: 0.85rem; color: #38bdf8; font-weight: 500;">近 ${response.window_days} 天趋势</div>
+                            <div style="font-size: 0.82rem; color: #e2e8f0; margin-top: 0.35rem;">${response.summary}</div>
+                            <div style="margin-top: 0.6rem; display: grid; gap: 0.4rem;">
+                                ${(response.series || []).map(item => `
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem;">
+                                        <span style="color: #94a3b8; width: 80px;">${this.getIndustryName(item.label)}</span>
+                                        <span style="flex: 1; background: #1e293b; border-radius: 0.35rem; height: 6px; overflow: hidden;">
+                                            <span style="display: block; width: ${item.value}%; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa);"></span>
+                                        </span>
+                                        <span style="color: #e2e8f0; width: 40px; text-align: right;">${item.value}</span>
+                                        <span style="color: ${item.change >= 0 ? '#10b981' : '#ef4444'}; width: 55px; text-align: right;">${item.change > 0 ? '+' : ''}${item.change}%</span>
+                                    </div>
+                                `).join('')}
                             </div>
                         `;
                     } else if (response && response.detail) {
