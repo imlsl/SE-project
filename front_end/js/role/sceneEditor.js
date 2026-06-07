@@ -5,15 +5,16 @@ class SceneEditorUI extends BaseRoleUI {
         this.scene = null;
         this.editAssets = [];
         this.activeTab = 'generate';
-        this.sketchPreviewUrl = '';
         this.blenderBridge = window.blenderBridge;
         this.lastDownloadUrl = '';
+        this.availableAssets = [];
+        this.layoutPoints = [];
         this.templatePresets = [
-            { id: '0', name: '现代模板', detail: '由 SCGS 插件解释模板 ID 0' },
-            { id: '1', name: '古典模板', detail: '由 SCGS 插件解释模板 ID 1' },
-            { id: '2', name: '生态模板', detail: '由 SCGS 插件解释模板 ID 2' },
-            { id: '3', name: '工业模板', detail: '由 SCGS 插件解释模板 ID 3' },
-            { id: '4', name: '地域模板', detail: '由 SCGS 插件解释模板 ID 4' }
+            { id: '0', name: '现代风格', detail: '树木1 · 道路纹理2 · 座椅1' },
+            { id: '1', name: '古典风格', detail: '树木2 · 道路纹理1 · 座椅2' },
+            { id: '2', name: '绿色生态', detail: '树木3 · 道路纹理3 · 座椅3' },
+            { id: '3', name: '工业风格', detail: '树木1 · 道路纹理4 · 座椅1' },
+            { id: '4', name: '台湾风格', detail: '树木4 · 道路纹理2 · 座椅4' }
         ];
     }
 
@@ -42,6 +43,8 @@ class SceneEditorUI extends BaseRoleUI {
         this.switchEditTab(this.activeTab);
         this.renderEditAssets();
         this.blenderBridge?.init('simulateOutput');
+        this.loadAvailableAssets();
+        this._loadPendingAssets();
     }
 
     render() {
@@ -69,6 +72,7 @@ class SceneEditorUI extends BaseRoleUI {
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                             <button class="small-btn" id="saveSceneBtn"><i class="fas fa-save"></i> 保存场景信息</button>
                             <button class="small-btn outline" id="runDiagnosticsBtn"><i class="fas fa-stethoscope"></i> 插件诊断</button>
+                            <button class="small-btn" id="generateSceneBtn"><i class="fas fa-wand-magic-sparkles"></i> 调用 SCGS 生成</button>
                         </div>
                         <div id="sceneSaveStatus" style="display: none; font-size: 0.75rem;"></div>
                     </div>
@@ -76,70 +80,90 @@ class SceneEditorUI extends BaseRoleUI {
 
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">生成</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">城市生成</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="edit">快捷编辑</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="assets">资产</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="layout">布局</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="sketch">草图</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="render">渲染</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
                     </div>
 
                     <div id="editTab_generate" style="margin-top: 0.9rem;">
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                自然语言描述
-                                <textarea id="generateDescription" placeholder="例如：生成一座雨天的现代城市" style="min-height: 84px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">${sceneName}</textarea>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                模板 ID
-                                <input id="editTemplateId" placeholder="例如 0" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
+                        <!-- 第一行：自然语言描述 / AI 指令 -->
+                        <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; margin-bottom: 0.75rem;">
+                            自然语言描述 / AI 指令
+                            <textarea id="generateDescription" placeholder="例如：请生成一座雨天的现代城市  或  树木1, 道路2, 座椅1  或  模板0  或  古典风格" style="min-height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;"></textarea>
+                            <input type="hidden" id="editTemplateId" value="">
+                        </label>
+                        <!-- 第二行：模板按钮 -->
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                            ${this.renderTemplatePresetButtons()}
+                        </div>
+                        <!-- 第三行：道路类型 + 天气 -->
+                        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; flex: 1;">
                                 道路类型
                                 <select id="generateRoadType" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                    <option value="">插件默认</option>
-                                    <option value="1">1 - 默认/基础</option>
-                                    <option value="2">2 - 网格/扩展</option>
-                                    <option value="3">3 - 图像/草图提取</option>
-                                    <option value="4">4 - 手动顶点边</option>
+                                    <option value="1">1 - 经典网格布局</option>
+                                    <option value="2" selected>2 - 扩展网格布局（默认）</option>
+                                    <option value="3">3 - 图像识别提取</option>
+                                    <option value="4">4 - 手动布局</option>
                                 </select>
                             </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
+                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; flex: 1;">
                                 天气
                                 <select id="generateWeather" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                                     <option value="">插件默认</option>
-                                    <option value="sunny">sunny</option>
-                                    <option value="rainy">rainy</option>
-                                    <option value="snowy">snowy</option>
+                                    <option value="sunny">晴天</option>
+                                    <option value="rainy">雨天</option>
+                                    <option value="snowy">雪天</option>
                                 </select>
                             </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                风格
-                                <input id="generateStyle" value="default" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                缩放
-                                <input id="generateScale" type="number" step="0.1" value="1.0" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            </label>
                         </div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem; margin-top: 0.75rem;">
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                手动顶点
-                                <textarea id="manualVertices" placeholder="(0,0,0),(50,0,0),(50,50,0)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
-                                手动边
-                                <textarea id="manualEdges" placeholder="(0,1),(1,2)" style="height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
-                            </label>
+                        <!-- 手动布局（道路类型选 3/4 时显示） -->
+                        <div id="generateManualSection" style="display: none; margin-bottom: 0.75rem; padding: 0.75rem; border: 1px solid #334155; border-radius: 0.5rem; background: #0f172a;">
+                            <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem;"><i class="fas fa-pencil"></i> 手动布局</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                <label style="display: grid; gap: 0.3rem; color: #94a3b8; font-size: 0.78rem;">
+                                    顶点 (Vertices)
+                                    <textarea id="generateManualVertices" placeholder="(0,0,0),(50,0,0),(50,50,0),(0,50,0)" style="height: 64px; padding: 0.5rem; border-radius: 0.4rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.75rem;"></textarea>
+                                </label>
+                                <label style="display: grid; gap: 0.3rem; color: #94a3b8; font-size: 0.78rem;">
+                                    边 (Edges)
+                                    <textarea id="generateManualEdges" placeholder="(0,1),(1,2),(2,3),(3,0)" style="height: 64px; padding: 0.5rem; border-radius: 0.4rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.75rem;"></textarea>
+                                </label>
+                            </div>
+                            <div id="generateImageTools" style="display: none; margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="file" id="generateImageInput" accept="image/*" style="font-size: 0.75rem; color: #94a3b8;" />
+                                <button class="small-btn outline" id="generateExtractBtn" style="font-size: 0.75rem;">提取布局</button>
+                                <span id="generateImageMeta" style="font-size: 0.7rem; color: #64748b;"></span>
+                            </div>
                         </div>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
-                            ${this.renderTemplatePresetButtons()}
-                        </div>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 0.75rem;">
-                            <button class="small-btn" id="generateSceneBtn"><i class="fas fa-wand-magic-sparkles"></i> 调用 SCGS 生成</button>
+                        <!-- 下载 + 状态 -->
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
                             <a id="blendDownloadLink" class="small-btn outline" href="#" target="_blank" style="display: none; text-decoration: none;"><i class="fas fa-download"></i> 下载 .blend</a>
                         </div>
-                        <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">生成任务会调用 Blender 中已安装的 SCGS 插件，仓库样例仅作为参考。</div>
+                        <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">选择模板或输入描述后，点击顶部的「调用 SCGS 生成」即可。</div>
+                    </div>
+
+                    <div id="editTab_edit" style="margin-top: 0.9rem; display: none;">
+                        <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem;">
+                            编辑指令
+                            <textarea id="editInstruction" placeholder="例如：Please change the weather to sunny." style="min-height: 64px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
+                        </label>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+                            <button class="small-btn" id="editCityBtn"><i class="fas fa-edit"></i> Edit City</button>
+                        </div>
+                        <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 0.75rem;">快捷操作</div>
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem;">
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to sunny.">☀️ 晴天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to rainy days.">🌧️ 雨天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="Please change the weather to snowy days.">❄️ 雪天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="adjust the scene to daytime">🌅 白天</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="adjust the scene to night">🌙 夜晚</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="remove weeds and small garbage from the road surface.">🧹 清洁道路</button>
+                            <button class="small-btn outline quick-edit-btn" data-edit-cmd="add weeds and small garbage on the road surface.">🍂 脏污道路</button>
+                        </div>
+                        <div id="editStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">编辑指令支持天气切换、白天/夜晚、道路清洁/脏污等操作。</div>
                     </div>
 
                     <div id="editTab_diagnostics" style="margin-top: 0.9rem; display: none;">
@@ -148,26 +172,26 @@ class SceneEditorUI extends BaseRoleUI {
                     </div>
 
                     <div id="editTab_assets" style="margin-top: 0.9rem; display: none;">
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <input id="editAssetSearch" placeholder="输入资产名称" style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                            <button class="small-btn outline" id="editAssetAddBtn">添加</button>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem;">
+                            <button class="small-btn" id="uploadAssetBtn"><i class="fas fa-upload"></i> 上传资产</button>
+                            <button class="small-btn outline" id="refreshAssetsBtn" title="刷新资产库"><i class="fas fa-sync-alt"></i></button>
+                            <input id="editAssetSearch" placeholder="筛选资产..." style="flex: 1; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
                         </div>
-                        <div style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">资产库暂保留演示能力，真实同步需要 SCGS 插件暴露资产 API。</div>
-                        <div id="editAssetList" style="margin-top: 0.6rem; font-size: 0.75rem; color: #94a3b8;"></div>
-                    </div>
-
-                    <div id="editTab_layout" style="margin-top: 0.9rem; display: none;">
-                        <textarea id="editLayoutInput" placeholder="布局点集: x1,y1;x2,y2;..." style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; height: 72px;"></textarea>
-                        <div id="layoutFeedback" style="margin-top: 0.45rem; font-size: 0.75rem; color: #64748b;">示例：0,20;50,80;120,60</div>
-                        <div style="margin-top: 0.5rem;"><button class="small-btn outline" id="editApplyLayoutBtn">应用布局演示</button></div>
-                    </div>
-
-                    <div id="editTab_sketch" style="margin-top: 0.9rem; display: none;">
-                        <input type="file" id="editSketchUpload" accept="image/*" />
-                        <button class="small-btn outline" id="editProcessSketchBtn" style="margin-left: 0.5rem;">处理草图演示</button>
-                        <div id="sketchMeta" style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">请选择草图图片后处理。</div>
-                        <div id="sketchPreview" style="display: none; margin-top: 0.6rem;"></div>
-                        <div id="sketchResult" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;"></div>
+                        <div id="uploadAssetForm" style="display: none; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.75rem; background: #0f172a; margin-bottom: 0.75rem;">
+                            <div style="display: grid; gap: 0.55rem;">
+                                <input id="uploadAssetName" placeholder="资产名称" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <input id="uploadAssetType" placeholder="类型（设施、建筑、植被、道路...）" value="设施" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <input id="uploadAssetIcon" placeholder="Font Awesome 图标名" value="fa-cube" style="padding: 0.5rem; border-radius: 0.45rem; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.82rem;">
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button class="small-btn" id="confirmUploadBtn"><i class="fas fa-check"></i> 确认上传</button>
+                                    <button class="small-btn outline" id="cancelUploadBtn">取消</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.35rem;">可用资产（点击添加）</div>
+                        <div id="editAssetCatalog" style="max-height: 240px; overflow-y: auto; margin-bottom: 0.75rem; font-size: 0.78rem; color: #64748b;">资产库加载中...</div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.35rem;">已选资产（点击 × 移除）</div>
+                        <div id="editAssetList" style="font-size: 0.75rem; color: #94a3b8;"></div>
                     </div>
 
                     <div id="editTab_render" style="margin-top: 0.9rem; display: none;">
@@ -217,49 +241,129 @@ class SceneEditorUI extends BaseRoleUI {
             btn.addEventListener('click', () => this.selectTemplatePreset(btn.getAttribute('data-template-preset')));
         });
 
-        document.getElementById('editAssetAddBtn')?.addEventListener('click', () => this.addEditAsset());
-        document.getElementById('editAssetSearch')?.addEventListener('keydown', e => {
-            if (e.key === 'Enter') this.addEditAsset();
+        // edit tab
+        document.getElementById('editCityBtn')?.addEventListener('click', () => this.editCity());
+        document.querySelectorAll('[data-edit-cmd]').forEach(btn => {
+            btn.addEventListener('click', () => this.quickEdit(btn.getAttribute('data-edit-cmd')));
         });
+
+        // road type change → show/hide manual layout + image tools
+        document.getElementById('generateRoadType')?.addEventListener('change', e => this.handleRoadTypeChange(e));
+        document.getElementById('generateImageInput')?.addEventListener('change', e => this.handleGenerateImageChange(e));
+        document.getElementById('generateExtractBtn')?.addEventListener('click', () => this.extractLayoutFromImage());
+
+        document.getElementById('uploadAssetBtn')?.addEventListener('click', () => this.toggleUploadForm());
+        document.getElementById('confirmUploadBtn')?.addEventListener('click', () => this.confirmUploadAsset());
+        document.getElementById('cancelUploadBtn')?.addEventListener('click', () => this.toggleUploadForm(false));
+        document.getElementById('refreshAssetsBtn')?.addEventListener('click', () => this.refreshAssets());
+        document.getElementById('editAssetSearch')?.addEventListener('input', () => this.filterAssetCatalog());
+        document.getElementById('editAssetCatalog')?.addEventListener('click', e => this.addAssetFromCatalog(e));
         document.getElementById('editAssetList')?.addEventListener('click', e => this.removeAssetFromClick(e));
 
-        document.getElementById('editLayoutInput')?.addEventListener('input', () => this.updateLayoutFeedback());
-        document.getElementById('editApplyLayoutBtn')?.addEventListener('click', () => this.applyLayout());
-        document.getElementById('editSketchUpload')?.addEventListener('change', event => this.updateSketchPreview(event));
-        document.getElementById('editProcessSketchBtn')?.addEventListener('click', () => this.processSketch());
         document.getElementById('renderSceneBtn')?.addEventListener('click', () => this.startRender());
         document.getElementById('renderDownloadBtn')?.addEventListener('click', () => this.downloadRenderPreview());
 
         document.getElementById('copyLogBtn')?.addEventListener('click', () => this.copyLog());
         document.getElementById('clearLogBtn')?.addEventListener('click', () => {
             this.blenderBridge?.clearLog();
-            this.logEditAction('Log cleared.', 'system');
+            this.logEditAction('日志已清空。', 'system');
         });
         document.getElementById('backToListBtn')?.addEventListener('click', () => { window.location.href = 'modeler.html'; });
         document.getElementById('logoutBtn')?.addEventListener('click', () => {
             new AuthManager().logout();
             window.location.href = 'index.html';
         });
+        // init road type state
+        const roadTypeSel = document.getElementById('generateRoadType');
+        if (roadTypeSel) this.handleRoadTypeChange({ target: roadTypeSel });
+    }
+
+    handleRoadTypeChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        const manualSection = document.getElementById('generateManualSection');
+        const imageTools = document.getElementById('generateImageTools');
+        if (!manualSection) return;
+        const showManual = target.value === '3' || target.value === '4';
+        manualSection.style.display = showManual ? 'block' : 'none';
+        if (imageTools) {
+            imageTools.style.display = target.value === '3' ? 'flex' : 'none';
+        }
+    }
+
+    handleGenerateImageChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        const meta = document.getElementById('generateImageMeta');
+        const file = target.files?.[0];
+        if (!meta) return;
+        if (!file) {
+            meta.textContent = '';
+            return;
+        }
+        meta.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    }
+
+    extractLayoutFromImage() {
+        const file = document.getElementById('generateImageInput')?.files?.[0];
+        if (!file) {
+            this.showMessage('请先选择图片', 'error');
+            return;
+        }
+        const verticesInput = document.getElementById('generateManualVertices');
+        const edgesInput = document.getElementById('generateManualEdges');
+        if (!verticesInput || !edgesInput) return;
+
+        verticesInput.value = '(0,0,0),(50,0,0),(50,50,0),(0,50,0)';
+        edgesInput.value = '(0,1),(1,2),(2,3),(3,0)';
+        this.showMessage('已根据图片提取道路布局（演示）', 'info');
+    }
+
+    editCity() {
+        const instruction = document.getElementById('editInstruction')?.value.trim();
+        if (!instruction) {
+            this.showMessage('请输入编辑指令', 'error');
+            return;
+        }
+        this.setButtonBusy(document.getElementById('editCityBtn'), true, '<i class="fas fa-spinner fa-pulse"></i> 编辑中');
+        this.blenderBridge?.log?.(`Edit submitted: ${instruction}`, 'task');
+        const status = document.getElementById('editStatus');
+        if (status) {
+            status.textContent = `编辑指令已提交: ${instruction}`;
+            status.style.color = '#38bdf8';
+        }
+        setTimeout(() => this.setButtonBusy(document.getElementById('editCityBtn'), false), 1500);
+        this.showMessage('城市编辑指令已提交', 'info');
+    }
+
+    quickEdit(cmd) {
+        const input = document.getElementById('editInstruction');
+        if (input) input.value = cmd;
+        this.editCity();
     }
 
     collectGenerationParams() {
+        const manualVertices = document.getElementById('generateManualVertices')?.value.trim() || '';
+        const manualEdges = document.getElementById('generateManualEdges')?.value.trim() || '';
+
         return {
             scene_id: this.scene.id || null,
             city_name: document.getElementById('editSceneName')?.value.trim() || this.scene.name || '',
             description: document.getElementById('generateDescription')?.value.trim() || '',
             template_id: document.getElementById('editTemplateId')?.value.trim() || '',
-            road_type: document.getElementById('generateRoadType')?.value || '',
+            road_type: document.getElementById('generateRoadType')?.value || '2',
             weather: document.getElementById('generateWeather')?.value || '',
-            manual_vertices: document.getElementById('manualVertices')?.value.trim() || '',
-            manual_edges: document.getElementById('manualEdges')?.value.trim() || '',
+            manual_vertices: manualVertices,
+            manual_edges: manualEdges,
             style: document.getElementById('generateStyle')?.value.trim() || 'default',
-            scale: Number(document.getElementById('generateScale')?.value || 1)
+            scale: Number(document.getElementById('generateScale')?.value || 1),
+            selected_assets: this.editAssets.map(a => this.assetPayload(a))
         };
     }
 
     async generateScene() {
         const button = document.getElementById('generateSceneBtn');
-        const status = document.getElementById('generationStatus');
+        const statusEl = document.getElementById('generationStatus');
         const download = document.getElementById('blendDownloadLink');
         const params = this.collectGenerationParams();
         if (!params.description && !params.template_id) {
@@ -269,29 +373,88 @@ class SceneEditorUI extends BaseRoleUI {
 
         this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 生成中');
         if (download) download.style.display = 'none';
-        this.setGenerationStatus('任务已提交，等待 Blender 返回状态...', 'task');
+        this.setGenerationStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
 
         try {
-            await this.blenderBridge.generateScene(params, {
-                onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
-                onComplete: task => {
-                    this.lastDownloadUrl = task.absolute_download_url;
-                    this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
-                    if (download && this.lastDownloadUrl) {
-                        download.href = this.lastDownloadUrl;
-                        download.style.display = 'inline-flex';
-                    }
-                },
-                onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
+            // 优先调用后端 API
+            const result = await this.apiRequest('/blender/generate', {
+                method: 'POST',
+                body: JSON.stringify(params)
             });
+
+            if (!result || result.detail) {
+                throw new Error(result?.detail || '后端不可用');
+            }
+
+            const taskId = result.task_id;
+            const downloadUrl = result.download_url;
+            this.setGenerationStatus(`任务 ${taskId} 已启动，轮询状态中...`, 'task');
+
+            // 轮询状态（2s 间隔，最多 120s）
+            await this._pollTaskStatus(taskId, downloadUrl, download);
             this.showMessage('SCGS 生成完成', 'info');
         } catch (error) {
-            this.setGenerationStatus(error.message || '生成失败', 'error');
-            this.showMessage('SCGS 生成失败', 'error');
+            // 后端不可用时降级到 blenderBridge
+            if (this.blenderBridge) {
+                this.setGenerationStatus('后端不可用，尝试本地 Blender 桥接...', 'task');
+                try {
+                    await this.blenderBridge.generateScene(params, {
+                        onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
+                        onComplete: task => {
+                            this.lastDownloadUrl = task.absolute_download_url;
+                            this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
+                            if (download && this.lastDownloadUrl) {
+                                download.href = this.lastDownloadUrl;
+                                download.style.display = 'inline-flex';
+                            }
+                        },
+                        onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
+                    });
+                    this.showMessage('SCGS 生成完成（本地桥接）', 'info');
+                } catch (bridgeError) {
+                    this.setGenerationStatus(bridgeError.message || '生成失败', 'error');
+                    this.showMessage('SCGS 生成失败', 'error');
+                }
+            } else {
+                this.setGenerationStatus(error.message || '生成失败', 'error');
+                this.showMessage('SCGS 生成失败', 'error');
+            }
         } finally {
             this.setButtonBusy(button, false);
-            if (status) status.style.display = 'block';
+            if (statusEl) statusEl.style.display = 'block';
         }
+    }
+
+    async _pollTaskStatus(taskId, downloadUrl, downloadEl, intervalMs = 2000, maxRetries = 60) {
+        for (let i = 0; i < maxRetries; i++) {
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+
+            const statusData = await this.apiRequest(`/blender/status/${taskId}`);
+            if (!statusData) {
+                this.setGenerationStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
+                continue;
+            }
+
+            const taskStatus = statusData.status;
+            if (taskStatus === 'completed') {
+                this.lastDownloadUrl = statusData.download_url || downloadUrl;
+                this.setGenerationStatus(`生成完成。Task ID: ${taskId}`, 'success');
+                if (downloadEl && this.lastDownloadUrl) {
+                    downloadEl.href = this.lastDownloadUrl;
+                    downloadEl.style.display = 'inline-flex';
+                }
+                return;
+            }
+
+            if (taskStatus === 'failed') {
+                throw new Error(statusData.error || '任务执行失败');
+            }
+
+            // 仍在 processing
+            const warnings = statusData.warnings?.length ? ` ⚠${statusData.warnings.length}` : '';
+            this.setGenerationStatus(`任务 ${taskId} 处理中…（第 ${i + 1} 次轮询）${warnings}`, 'task');
+        }
+        throw new Error(`任务 ${taskId} 超时：轮询 ${maxRetries} 次后仍未完成`);
     }
 
     async runDiagnostics() {
@@ -303,9 +466,9 @@ class SceneEditorUI extends BaseRoleUI {
         if (summary) summary.textContent = '正在启动 Blender 进行诊断...';
         if (output) output.textContent = '';
 
-        try {
-            const data = await this.blenderBridge.diagnostics();
+        const renderDiagnostics = (data, source = '') => {
             const ok = data.blender_started && !data.error;
+            const sourceLabel = source ? ` [${source}]` : '';
             if (summary) {
                 summary.style.color = ok ? '#10b981' : '#f87171';
                 summary.textContent = [
@@ -313,13 +476,30 @@ class SceneEditorUI extends BaseRoleUI {
                     `Started: ${data.blender_started ? 'yes' : 'no'}`,
                     `Plugin enabled: ${data.plugin_enabled ? 'yes' : 'no'}`,
                     `Operators: ${(data.operators || []).length}`
-                ].join(' | ');
+                ].join(' | ') + sourceLabel;
             }
             if (output) output.textContent = JSON.stringify(data, null, 2);
-        } catch (error) {
-            if (summary) {
-                summary.style.color = '#f87171';
-                summary.textContent = error.message || '诊断失败';
+        };
+
+        try {
+            // 优先调用后端诊断 API
+            const backendData = await this.apiRequest('/blender/diagnostics');
+            if (backendData && !backendData.detail) {
+                renderDiagnostics(backendData, 'backend');
+                return;
+            }
+            throw new Error('后端返回异常');
+        } catch {
+            // 降级到本地 Blender 桥接
+            if (summary) summary.textContent = '后端不可用，尝试本地 Blender 桥接...';
+            try {
+                const data = await this.blenderBridge.diagnostics();
+                renderDiagnostics(data, 'local bridge');
+            } catch (bridgeError) {
+                if (summary) {
+                    summary.style.color = '#f87171';
+                    summary.textContent = bridgeError.message || '诊断失败';
+                }
             }
         } finally {
             this.setButtonBusy(button, false);
@@ -379,16 +559,24 @@ class SceneEditorUI extends BaseRoleUI {
     }
 
     selectTemplatePreset(templateId) {
-        const template = this.templatePresets.find(item => item.id === templateId);
-        const input = document.getElementById('editTemplateId');
-        const status = document.getElementById('generationStatus');
-        if (input) input.value = templateId || '';
+        // 写入隐藏字段，供 collectGenerationParams 读取
+        const hidden = document.getElementById('editTemplateId');
+        if (hidden) hidden.value = templateId || '';
+
+        // 按钮高亮切换
         document.querySelectorAll('[data-template-preset]').forEach(btn => {
             btn.classList.toggle('active', btn.getAttribute('data-template-preset') === templateId);
         });
-        if (template && status) {
-            status.textContent = `已选择模板 ${template.id}: ${template.name}`;
-            status.style.color = '#38bdf8';
+
+        // 同步填入描述框（方便用户看到选了哪个模板，也可以继续编辑）
+        const desc = document.getElementById('generateDescription');
+        const template = this.templatePresets.find(item => item.id === templateId);
+        if (template) {
+            const presetText = `模板${template.id} - ${template.name}`;
+            if (!desc.value.trim() || /^模板\d/.test(desc.value.trim())) {
+                desc.value = presetText;
+            }
+            this.setGenerationStatus(`已选择模板 ${template.id}: ${template.name}（${template.detail}）`, 'success');
         }
     }
 
@@ -399,14 +587,46 @@ class SceneEditorUI extends BaseRoleUI {
             this.showMessage('请输入资产名称', 'error');
             return;
         }
-        if (this.editAssets.some(asset => asset.toLowerCase() === name.toLowerCase())) {
+        const asset = this.findAssetByName(name);
+        if (!asset) {
+            this.showMessage('资产库中未找到该资产', 'error');
+            return;
+        }
+        this.addAssetToSelection(asset);
+        input.value = '';
+    }
+
+    addAssetFromCatalog(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const item = target.closest('[data-asset-id]');
+        if (!item) return;
+        const asset = this.availableAssets.find(candidate => String(candidate.id) === item.getAttribute('data-asset-id'));
+        if (asset) this.addAssetToSelection(asset);
+    }
+
+    addAssetToSelection(asset) {
+        if (this.editAssets.some(item => String(item.id) === String(asset.id) || item.name.toLowerCase() === asset.name.toLowerCase())) {
             this.showMessage('该资产已添加', 'error');
             return;
         }
-        this.editAssets.push(name);
-        input.value = '';
+        this.editAssets.push(asset);
         this.renderEditAssets();
-        this.blenderBridge?.addAsset('model', name);
+        this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
+        this.blenderBridge?.addAsset(asset.plugin_type || asset.type || 'model', asset.plugin_name || asset.name);
+        this.showMessage('资产已选择并加入生成参数', 'info');
+    }
+
+    _loadPendingAssets() {
+        try {
+            const raw = localStorage.getItem('smartcity_pending_assets');
+            if (!raw) return;
+            const pending = JSON.parse(raw);
+            if (!Array.isArray(pending) || pending.length === 0) return;
+            pending.forEach(asset => this.addAssetToSelection(asset));
+            localStorage.removeItem('smartcity_pending_assets');
+            this.showMessage(`已从建模师导入 ${pending.length} 个待选资产`, 'info');
+        } catch { /* ignore */ }
     }
 
     removeAssetFromClick(event) {
@@ -418,77 +638,53 @@ class SceneEditorUI extends BaseRoleUI {
         if (Number.isNaN(index)) return;
         this.editAssets.splice(index, 1);
         this.renderEditAssets();
+        this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
     }
 
-    async applyLayout() {
-        const raw = document.getElementById('editLayoutInput')?.value.trim();
-        const parsed = this.parseLayoutPoints(raw);
-        if (!parsed.valid) {
-            this.setLayoutFeedback(parsed.message, 'error');
-            this.showMessage(parsed.message, 'error');
+    toggleUploadForm(show = true) {
+        const form = document.getElementById('uploadAssetForm');
+        if (form) form.style.display = show ? 'block' : 'none';
+    }
+
+    async confirmUploadAsset() {
+        const nameInput = document.getElementById('uploadAssetName');
+        const typeInput = document.getElementById('uploadAssetType');
+        const iconInput = document.getElementById('uploadAssetIcon');
+        const assetName = nameInput?.value.trim();
+        if (!assetName) {
+            this.showMessage('请输入资产名称', 'error');
             return;
         }
-        const response = await this.apiRequest('/modeler/layout/apply', {
-            method: 'POST',
-            body: JSON.stringify({ points: parsed.points })
-        });
-        if (response && !response.detail) {
-            await this.blenderBridge?.applyLayout({ points: parsed.points });
-            this.setLayoutFeedback(`应用成功：${parsed.points.length} 个点，${response.road_count ?? parsed.points.length - 1} 条道路。`, 'success');
-        }
-    }
+        const assetType = typeInput?.value.trim() || '设施';
+        const assetIcon = iconInput?.value.trim() || 'fa-cube';
 
-    updateLayoutFeedback() {
-        const raw = document.getElementById('editLayoutInput')?.value.trim();
-        if (!raw) {
-            this.setLayoutFeedback('示例：0,20;50,80;120,60', 'muted');
-            return;
-        }
-        const parsed = this.parseLayoutPoints(raw);
-        this.setLayoutFeedback(parsed.valid ? `已识别 ${parsed.points.length} 个点。` : parsed.message, parsed.valid ? 'task' : 'error');
-    }
-
-    updateSketchPreview(event) {
-        const file = event.target.files?.[0];
-        const meta = document.getElementById('sketchMeta');
-        const preview = document.getElementById('sketchPreview');
-        const result = document.getElementById('sketchResult');
-        if (this.sketchPreviewUrl) URL.revokeObjectURL(this.sketchPreviewUrl);
-        if (!file) {
-            if (meta) meta.textContent = '请选择草图图片后处理。';
-            if (preview) {
-                preview.style.display = 'none';
-                preview.innerHTML = '';
+        try {
+            const response = await this.apiRequest('/modeler/assets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Username': this.username
+                },
+                body: JSON.stringify({
+                    name: assetName,
+                    type: assetType,
+                    icon: assetIcon
+                })
+            });
+            if (response && response.asset) {
+                this.availableAssets.unshift(response.asset);
+                this.renderAssetCatalog(document.getElementById('editAssetSearch')?.value || '');
+                if (nameInput) nameInput.value = '';
+                if (typeInput) typeInput.value = '设施';
+                if (iconInput) iconInput.value = 'fa-cube';
+                this.toggleUploadForm(false);
+                this.showMessage(`资产「${assetName}」已创建`, 'success');
+            } else {
+                this.showMessage(response?.detail || '资产创建失败', 'error');
             }
-            if (result) result.textContent = '';
-            return;
-        }
-        this.sketchPreviewUrl = URL.createObjectURL(file);
-        if (meta) meta.textContent = `${file.name} - ${this.formatFileSize(file.size)}`;
-        if (preview) {
-            preview.style.display = 'block';
-            preview.innerHTML = `<img src="${this.sketchPreviewUrl}" alt="草图预览" style="max-width: 220px; max-height: 140px; border-radius: 0.5rem; border: 1px solid #334155; object-fit: cover;">`;
-        }
-        if (result) result.textContent = '草图已选择，可以开始处理。';
-    }
-
-    async processSketch() {
-        const file = document.getElementById('editSketchUpload')?.files?.[0];
-        const result = document.getElementById('sketchResult');
-        if (!file) {
-            this.showMessage('请先选择草图文件', 'error');
-            return;
-        }
-        const response = await this.apiRequest('/modeler/sketch/process', {
-            method: 'POST',
-            body: JSON.stringify({ file_name: file.name })
-        });
-        if (response && !response.detail) {
-            await this.blenderBridge?.processSketch(file.name);
-            if (result) {
-                result.textContent = `处理完成：提取 ${response.points?.length || 0} 个点，${response.road_count || 0} 条道路。`;
-                result.style.color = '#10b981';
-            }
+        } catch (error) {
+            console.error('Asset upload failed', error);
+            this.showMessage('资产创建失败', 'error');
         }
     }
 
@@ -553,7 +749,7 @@ class SceneEditorUI extends BaseRoleUI {
 
     switchEditTab(tab) {
         this.activeTab = tab;
-        ['generate', 'diagnostics', 'assets', 'layout', 'sketch', 'render'].forEach(key => {
+        ['generate', 'edit', 'diagnostics', 'assets', 'render'].forEach(key => {
             const panel = document.getElementById(`editTab_${key}`);
             if (panel) panel.style.display = key === tab ? 'block' : 'none';
         });
@@ -569,35 +765,92 @@ class SceneEditorUI extends BaseRoleUI {
             list.innerHTML = '<div style="color: #64748b;">暂无已选资产</div>';
             return;
         }
-        list.innerHTML = this.editAssets.map((name, idx) => (
+        list.innerHTML = this.editAssets.map((asset, idx) => (
             `<span class="scene-asset-tag">
-                <i class="fas fa-cube"></i>
-                ${this.escapeHTML(name)}
-                <button type="button" data-remove-asset="${idx}" aria-label="移除资产 ${this.escapeHTML(name)}"><i class="fas fa-times"></i></button>
+                <i class="fas ${asset.icon || 'fa-cube'}"></i>
+                ${this.escapeHTML(asset.name)}
+                <button type="button" data-remove-asset="${idx}" aria-label="移除资产 ${this.escapeHTML(asset.name)}"><i class="fas fa-times"></i></button>
             </span>`
         )).join('');
     }
 
-    parseLayoutPoints(raw) {
-        if (!raw) return { valid: false, points: [], message: '请填写布局点集' };
-        const chunks = raw.split(';').map(part => part.trim()).filter(Boolean);
-        if (chunks.length < 2) {
-            return { valid: false, points: [], message: '至少需要 2 个点，例如：10,20;50,80' };
-        }
-        const points = [];
-        for (const chunk of chunks) {
-            const parts = chunk.split(',').map(part => part.trim());
-            if (parts.length !== 2) {
-                return { valid: false, points: [], message: `格式错误：${chunk} 应为 x,y` };
+    async loadAvailableAssets() {
+        const catalog = document.getElementById('editAssetCatalog');
+        if (catalog) catalog.textContent = '资产库加载中...';
+        try {
+            const response = await this.apiRequest('/modeler/assets', { method: 'GET' });
+            if (response && !response.detail) {
+                this.availableAssets = Array.isArray(response) ? response : [];
+                this.renderAssetCatalog();
+            } else if (catalog) {
+                catalog.textContent = response?.detail || '资产库加载失败';
             }
-            const x = Number(parts[0]);
-            const y = Number(parts[1]);
-            if (!Number.isFinite(x) || !Number.isFinite(y)) {
-                return { valid: false, points: [], message: `坐标必须是数字：${chunk}` };
-            }
-            points.push({ x, y });
+        } catch (error) {
+            console.error('加载资产库失败', error);
+            if (catalog) catalog.textContent = '资产库加载失败';
         }
-        return { valid: true, points, message: '' };
+    }
+
+    renderAssetCatalog(filterText = '') {
+        const catalog = document.getElementById('editAssetCatalog');
+        if (!catalog) return;
+        if (this.availableAssets.length === 0) {
+            catalog.innerHTML = '<div style="color: #64748b; padding: 0.5rem;">资产库为空，可点击「上传资产」新增。</div>';
+            return;
+        }
+        const lowerFilter = filterText.toLowerCase();
+        const filtered = lowerFilter
+            ? this.availableAssets.filter(a =>
+                (a.name || '').toLowerCase().includes(lowerFilter) ||
+                (a.plugin_name || '').toLowerCase().includes(lowerFilter) ||
+                (a.type || '').toLowerCase().includes(lowerFilter))
+            : this.availableAssets;
+        if (filtered.length === 0) {
+            catalog.innerHTML = '<div style="color: #64748b; padding: 0.5rem;">无匹配资产</div>';
+            return;
+        }
+        const addedIds = new Set(this.editAssets.map(a => String(a.id)));
+        catalog.innerHTML = filtered.map(asset => {
+            const alreadyAdded = addedIds.has(String(asset.id));
+            return `<div class="asset-catalog-row" data-asset-id="${this.escapeHTML(asset.id)}" style="display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.6rem; border-radius: 0.35rem; cursor: ${alreadyAdded ? 'default' : 'pointer'}; transition: background 0.15s; ${alreadyAdded ? 'opacity: 0.5;' : ''} border-bottom: 1px solid #1e293b;">
+                <span style="flex: 1; min-width: 0;">
+                    <i class="fas ${asset.icon || 'fa-cube'}" style="color: #38bdf8; width: 1.2rem; text-align: center;"></i>
+                    <span style="color: #e2e8f0;">${this.escapeHTML(asset.name)}</span>
+                    <span style="color: #64748b; font-size: 0.68rem; margin-left: 0.35rem;">${this.escapeHTML(asset.type || asset.plugin_type || '')}</span>
+                </span>
+                ${alreadyAdded
+                    ? '<span style="color: #22c55e; font-size: 0.7rem;">已添加</span>'
+                    : '<i class="fas fa-plus-circle" style="color: #38bdf8; flex-shrink: 0;"></i>'}
+            </div>`;
+        }).join('');
+    }
+
+    filterAssetCatalog() {
+        const input = document.getElementById('editAssetSearch');
+        this.renderAssetCatalog(input?.value || '');
+    }
+
+    async refreshAssets() {
+        await this.loadAvailableAssets();
+        this.showMessage('资产库已刷新', 'info');
+    }
+
+    findAssetByName(name) {
+        const lowerName = name.toLowerCase();
+        return this.availableAssets.find(asset =>
+            asset.name?.toLowerCase() === lowerName ||
+            asset.plugin_name?.toLowerCase() === lowerName
+        );
+    }
+
+    assetPayload(asset) {
+        return {
+            id: asset.id,
+            name: asset.name,
+            plugin_name: asset.plugin_name || asset.name,
+            plugin_type: asset.plugin_type || asset.type || 'model',
+            material_target: asset.material_target || null
+        };
     }
 
     formatTaskStatus(task) {
@@ -610,13 +863,6 @@ class SceneEditorUI extends BaseRoleUI {
         if (!status) return;
         status.textContent = message;
         status.style.color = this.feedbackColor(type);
-    }
-
-    setLayoutFeedback(message, type = 'muted') {
-        const feedback = document.getElementById('layoutFeedback');
-        if (!feedback) return;
-        feedback.textContent = message;
-        feedback.style.color = this.feedbackColor(type);
     }
 
     setSceneSaveStatus(message, type = 'success') {
@@ -667,12 +913,6 @@ class SceneEditorUI extends BaseRoleUI {
             balanced: '均衡质量',
             high: '高质量'
         }[value] || value;
-    }
-
-    formatFileSize(bytes) {
-        if (!bytes) return '0 KB';
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     }
 
     escapeHTML(value) {

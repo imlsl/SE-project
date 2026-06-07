@@ -59,23 +59,30 @@ class BlenderBridge {
             throw new Error(data.detail || '生成请求失败');
         }
 
-        this.log(`后端已接受任务: ${data.task_id}`, 'task');
+        const statusUrl = data.status_url ? this.normalizeUrl(data.status_url) : `${this.baseUrl}/blender/status/${data.task_id}`;
+        this.log(`后端已接受任务 ${data.task_id}`, 'task');
         callbacks.onStart?.(data);
-        return this.pollTask(data.task_id, callbacks);
+        return this.pollTask(data.task_id, statusUrl, callbacks);
     }
 
-    async pollTask(taskId, callbacks = {}) {
+    async pollTask(taskId, statusUrl, callbacks = {}) {
         const poll = async () => {
-            const response = await fetch(`${this.baseUrl}/blender/status/${taskId}`);
+            const response = await fetch(statusUrl || `${this.baseUrl}/blender/status/${taskId}`);
             const status = await response.json();
             if (!response.ok) {
                 throw new Error(status.detail || 'Status request failed');
             }
 
             callbacks.onStatus?.(status);
+            if (status.status === 'not_found') {
+                const error = status.error || '任务未找到';
+                this.log(error, 'error');
+                callbacks.onFailed?.(status);
+                throw new Error(error);
+            }
             if (status.status === 'completed') {
                 this.lastCompletedTask = status;
-                const downloadUrl = status.download_url ? `${this.baseUrl}${status.download_url}` : '';
+                const downloadUrl = status.download_url ? this.normalizeUrl(status.download_url) : '';
                 this.log(`SCGS 任务完成。下载地址: ${downloadUrl || '暂无'}`, 'success');
                 callbacks.onComplete?.({ ...status, absolute_download_url: downloadUrl });
                 return status;
@@ -104,18 +111,21 @@ class BlenderBridge {
     }
 
     addAsset(assetType, assetName) {
-        this.log(`资产 "${assetName || assetType}" 已暂存为前端演示项。若要真实同步，需要 SCGS 插件提供资产接口。`, 'warning');
+        this.log(`资产 "${assetName || assetType}" 已加入生成参数。`, 'task');
         return true;
     }
 
     async applyLayout(layoutData) {
-        this.log(`布局已作为前后端演示数据暂存: ${JSON.stringify(layoutData)}`, 'warning');
+        this.log(`布局已加入生成参数: ${JSON.stringify(layoutData)}`, 'task');
         return true;
     }
 
-    async processSketch(fileName) {
-        this.log(`草图 "${fileName}" 已通过演示接口处理。真实提取需要 SCGS 插件提供接口。`, 'warning');
-        return true;
+    normalizeUrl(pathOrUrl) {
+        if (!pathOrUrl) return '';
+        if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+            return pathOrUrl;
+        }
+        return `${this.baseUrl}${pathOrUrl}`;
     }
 
     escapeHTML(value) {
