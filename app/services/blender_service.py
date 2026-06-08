@@ -113,6 +113,38 @@ class BlenderService:
         return task_id
 
     @classmethod
+    async def trigger_scene_edit(cls, source_task_id: str, parameters: dict[str, Any]) -> str:
+        """基于已有生成结果启动场景编辑任务。"""
+        cls._ensure_loaded()
+        source_output_path = cls.output_path_for(source_task_id)
+        if not source_output_path.exists():
+            raise ValueError(f"源 Blender 输出文件不存在，任务 ID: {source_task_id}")
+
+        task_id = str(uuid.uuid4())
+        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = EXPORT_DIR / f"output_{task_id}.blend"
+        task = {
+            "task_id": task_id,
+            "task_type": "edit",
+            "source_task_id": source_task_id,
+            "status": "processing",
+            "parameters": cls._standardize_edit_parameters(parameters),
+            "warnings": [],
+            "error": "",
+            "stdout": "",
+            "stderr": "",
+            "source_output_path": str(source_output_path.resolve()),
+            "output_path": str(output_path.resolve()),
+            "download_url": "",
+            "created_at": cls._now(),
+            "updated_at": cls._now(),
+        }
+        cls.TASKS[task_id] = task
+        cls._save_tasks()
+        asyncio.create_task(cls._run_blender_edit_task(task_id))
+        return task_id
+
+    @classmethod
     async def check_generation_status(cls, task_id: str) -> dict[str, Any]:
         cls._ensure_loaded()
         task = cls.TASKS.get(task_id)
@@ -135,6 +167,8 @@ class BlenderService:
 
         return {
             "task_id": task_id,
+            "task_type": task.get("task_type", "generation"),
+            "source_task_id": task.get("source_task_id", ""),
             "status": task.get("status", "processing"),
             "download_url": task.get("download_url", ""),
             "output_path": task.get("output_path", ""),
@@ -191,6 +225,55 @@ class BlenderService:
             return
 
         error = ""
+        if parsed and parsed.get("error"):
+            error = parsed["error"]
+        else:
+            error = (stderr_text + "\n" + stdout_text).strip() or f"Blender exited with code {process['returncode']}"
+        cls._mark_failed(task_id, error[-3000:], stdout_text, stderr_text)
+
+    @classmethod
+    async def _run_blender_edit_task(cls, task_id: str) -> None:
+        cls._ensure_loaded()
+        task = cls.TASKS[task_id]
+        cfg = cls.config()
+        blender_executable = cfg["blender_url"]
+
+        if not blender_executable or not Path(blender_executable).exists():
+            cls._mark_failed(task_id, f"Blender executable not found: {blender_executable or '(empty BLENDER_URL)'}")
+            return
+
+        if not cfg["edit_operator"]:
+            cls._mark_failed(
+                task_id,
+                "未配置 BLENDER_EDIT_OPERATOR。默认应为 sna.city_edit，可调用 /blender/diagnostics 查看候选算子。",
+            )
+            return
+
+        source_output_path = Path(task.get("source_output_path", ""))
+        if not source_output_path.exists():
+            cls._mark_failed(task_id, f"源 Blender 输出文件不存在: {source_output_path}")
+            return
+
+        script = cls._edit_script(cfg, task["parameters"], str(source_output_path), task["output_path"])
+        process = await cls._run_script(script, blender_executable)
+        stdout_text = process["stdout"]
+        stderr_text = process["stderr"]
+
+        task["stdout"] = stdout_text[-3000:]
+        task["stderr"] = stderr_text[-3000:]
+        task["updated_at"] = cls._now()
+
+        parsed = cls._extract_result_json(stdout_text)
+        if parsed:
+            task["warnings"] = parsed.get("warnings", task.get("warnings", []))
+
+        if process["returncode"] == 0 and Path(task["output_path"]).exists():
+            task["status"] = "completed"
+            task["download_url"] = f"/blender/download/{task_id}"
+            task["error"] = ""
+            cls._save_tasks()
+            return
+
         if parsed and parsed.get("error"):
             error = parsed["error"]
         else:
@@ -320,7 +403,7 @@ def set_if_exists(owner, name, value):
             setattr(owner, name, value)
             return True
         except Exception as exc:
-            result["warnings"].append(f"Could not set {{name}}: {{exc}}")
+            result["warnings"].append(f"无法设置 {{name}}: {{exc}}")
     return False
 
 def call_operator(operator_name):
@@ -433,6 +516,96 @@ if result["error"]:
 """
 
     @staticmethod
+    def _edit_script(cfg: dict[str, str], params: dict[str, Any], source_path: str, output_path: str) -> str:
+        return f"""
+import json
+import os
+import traceback
+
+cfg = json.loads({json.dumps(json.dumps(cfg, ensure_ascii=False), ensure_ascii=False)})
+params = json.loads({json.dumps(json.dumps(params, ensure_ascii=False), ensure_ascii=False)})
+source_path = {json.dumps(source_path)}
+output_path = {json.dumps(output_path)}
+result = {{"warnings": [], "error": ""}}
+
+def set_if_exists(owner, name, value):
+    if value in (None, ""):
+        return False
+    if hasattr(owner, name):
+        try:
+            setattr(owner, name, value)
+            return True
+        except Exception as exc:
+            result["warnings"].append(f"无法设置 {{name}}: {{exc}}")
+    return False
+
+def call_operator(operator_name):
+    if not operator_name or "." not in operator_name:
+        raise RuntimeError("算子名称无效，应为 namespace.operator 格式")
+    namespace, op_name = operator_name.split(".", 1)
+    namespace_obj = getattr(bpy.ops, namespace, None)
+    if namespace_obj is None:
+        raise RuntimeError(f"未找到算子命名空间: {{namespace}}")
+    operator = getattr(namespace_obj, op_name, None)
+    if operator is None:
+        raise RuntimeError(f"未找到算子: {{operator_name}}")
+    return operator()
+
+try:
+    import bpy
+
+    if not os.path.exists(source_path):
+        raise RuntimeError(f"源 .blend 文件不存在: {{source_path}}")
+
+    bpy.ops.wm.open_mainfile(filepath=source_path)
+
+    module = cfg.get("plugin_module", "")
+    if module:
+        try:
+            bpy.ops.preferences.addon_enable(module=module)
+        except Exception as exc:
+            result["warnings"].append(f"SCGS 插件启用失败（模块 {{module}}）: {{exc}}")
+    else:
+        result["warnings"].append("BLENDER_PLUGIN_MODULE 为空，将使用当前 Blender 已加载状态。")
+
+    scene = bpy.context.scene
+    instruction = params.get("instruction") or params.get("description") or ""
+    if not instruction:
+        raise RuntimeError("编辑指令为空，请提供 instruction 或 description")
+
+    param_to_props = {{
+        "instruction": ["sna_edit", "edit_instruction", "instruction", "ai_instruction", "sna_ai_instruction"],
+        "description": ["sna_description", "description", "city_description", "prompt"],
+    }}
+    unsupported = []
+    for key, prop_names in param_to_props.items():
+        value = params.get(key)
+        if value in (None, ""):
+            continue
+        if not any(set_if_exists(scene, prop_name, value) for prop_name in prop_names):
+            unsupported.append(key)
+    if unsupported:
+        result["warnings"].append("以下编辑参数未找到对应的场景属性: " + ", ".join(unsupported))
+
+    operator_result = call_operator(cfg.get("edit_operator", ""))
+    result["operator_result"] = list(operator_result) if isinstance(operator_result, set) else str(operator_result)
+    if "CANCELLED" in result["operator_result"]:
+        raise RuntimeError(f"编辑算子已取消: {{result['operator_result']}}")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    bpy.ops.wm.save_as_mainfile(filepath=output_path)
+    result["source_path"] = source_path
+    result["output_path"] = output_path
+except Exception as exc:
+    result["error"] = str(exc)
+    result["traceback"] = traceback.format_exc()
+
+print("BLENDER_BRIDGE_RESULT=" + json.dumps(result, ensure_ascii=False))
+if result["error"]:
+    raise SystemExit(2)
+"""
+
+    @staticmethod
     def _standardize_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
         description = parameters.get("description") or parameters.get("instruction") or parameters.get("city_name") or ""
         template_id = parameters.get("template_id")
@@ -456,6 +629,16 @@ if result["error"]:
             "selected_assets": parameters.get("selected_assets") or [],
             "style": str(parameters.get("style") or "default"),
             "scale": parameters.get("scale", 1.0),
+        }
+
+    @staticmethod
+    def _standardize_edit_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+        instruction = parameters.get("instruction") or parameters.get("description") or ""
+        description = parameters.get("description") or instruction
+        return {
+            "instruction": str(instruction or ""),
+            "description": str(description or ""),
+            "scene_id": parameters.get("scene_id"),
         }
 
     @classmethod

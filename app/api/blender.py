@@ -26,6 +26,13 @@ class SceneGenerationRequest(BaseModel):
     scene_id: Optional[int] = None
 
 
+class SceneEditRequest(BaseModel):
+    source_task_id: str
+    instruction: str = ""
+    description: str = ""
+    scene_id: Optional[int] = None
+
+
 @router.get("/diagnostics")
 async def blender_diagnostics():
     """检查 Blender 启动状态、SCGS 插件启用状态，以及候选 bpy.ops 算子。"""
@@ -39,6 +46,22 @@ async def generate_scene(request: SceneGenerationRequest):
     return {
         "message": "Scene generation task started successfully",
         "task_id": task_id,
+        "status_url": f"/blender/status/{task_id}",
+        "download_url": f"/blender/download/{task_id}",
+    }
+
+
+@router.post("/edit")
+async def edit_scene(request: SceneEditRequest):
+    """基于已完成的 Blender 生成任务启动 SCGS 场景编辑任务。"""
+    try:
+        task_id = await BlenderService.trigger_scene_edit(request.source_task_id, request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "message": "场景编辑任务已成功启动",
+        "task_id": task_id,
+        "source_task_id": request.source_task_id,
         "status_url": f"/blender/status/{task_id}",
         "download_url": f"/blender/download/{task_id}",
     }
