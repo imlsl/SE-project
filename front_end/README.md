@@ -63,13 +63,13 @@ frontend/
 
  **2.前端启动方式**
 
-建议通过以下命令启动系统进行使用和开发，其中```<port>```为本地端口号，可自行设置，或者直接访问本地静态文件
+建议通过以下命令启动系统进行使用和开发，默认本地端口号为```5500```，可自行设置，或者直接访问本地静态文件
 
 ```bash
-python -m http.server <port>
+python -m http.server 5500
 ```
 
-之后可在```http://127.0.0.1:<port>/front_end/index.html```进入系统
+之后可在```http://127.0.0.1:5500/front_end/index.html```进入系统
 
 > 不建议的方式：使用VS Code中的Live Server插件可快速搭建，但在某些界面会有交互的异常
 
