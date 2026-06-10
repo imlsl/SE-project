@@ -7,6 +7,7 @@ class SceneEditorUI extends BaseRoleUI {
         this.activeTab = 'generate';
         this.blenderBridge = window.blenderBridge;
         this.lastDownloadUrl = '';
+        this.lastBlendTaskId = '';
         this.availableAssets = [];
         this.layoutPoints = [];
         this.templatePresets = [
@@ -39,6 +40,7 @@ class SceneEditorUI extends BaseRoleUI {
         }
 
         this.render();
+        this.lastBlendTaskId = this.loadSceneBlendTaskId();
         this.bindEvents();
         this.switchEditTab(this.activeTab);
         this.renderEditAssets();
@@ -176,7 +178,7 @@ class SceneEditorUI extends BaseRoleUI {
                             <textarea id="editInstruction" placeholder="例如：Please change the weather to sunny." style="min-height: 64px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;"></textarea>
                         </label>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
-                            <button class="small-btn" id="editCityBtn"><i class="fas fa-edit"></i> Edit City</button>
+                            <button class="small-btn" id="editCityBtn"><i class="fas fa-edit"></i> 调整场景</button>
                         </div>
                         <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 0.75rem;">快捷操作</div>
                         <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem;">
@@ -188,7 +190,7 @@ class SceneEditorUI extends BaseRoleUI {
                             <button class="small-btn outline quick-edit-btn" data-edit-cmd="remove weeds and small garbage from the road surface.">🧹 清洁道路</button>
                             <button class="small-btn outline quick-edit-btn" data-edit-cmd="add weeds and small garbage on the road surface.">🍂 脏污道路</button>
                         </div>
-                        <div id="editStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">编辑指令支持天气切换、白天/夜晚、道路清洁/脏污等操作。</div>
+                        <div id="editStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">编辑指令支持天气切换、白天/夜晚、道路清洁/脏污等操作。请先完成一次 SCGS 生成，再调整生成结果。</div>
                     </div>
 
                     <div id="editTab_diagnostics" style="margin-top: 0.9rem; display: none;">
@@ -344,21 +346,51 @@ class SceneEditorUI extends BaseRoleUI {
         this.showMessage('已根据图片提取道路布局（演示）', 'info');
     }
 
-    editCity() {
+    async editCity() {
         const instruction = document.getElementById('editInstruction')?.value.trim();
+        const button = document.getElementById('editCityBtn');
+        const download = document.getElementById('blendDownloadLink');
         if (!instruction) {
             this.showMessage('请输入编辑指令', 'error');
             return;
         }
-        this.setButtonBusy(document.getElementById('editCityBtn'), true, '<i class="fas fa-spinner fa-pulse"></i> 编辑中');
-        this.blenderBridge?.log?.(`Edit submitted: ${instruction}`, 'task');
-        const status = document.getElementById('editStatus');
-        if (status) {
-            status.textContent = `编辑指令已提交: ${instruction}`;
-            status.style.color = '#38bdf8';
+
+        const sourceTaskId = this.getEditableBlendTaskId();
+        if (!sourceTaskId) {
+            this.setEditStatus('请先完成一次 SCGS 生成任务，再调整生成结果。', 'error');
+            this.showMessage('请先生成场景，再调整场景', 'error');
+            return;
         }
-        setTimeout(() => this.setButtonBusy(document.getElementById('editCityBtn'), false), 1500);
-        this.showMessage('城市编辑指令已提交', 'info');
+
+        this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 调整中');
+        this.setEditStatus(`调整任务提交中，源任务: ${sourceTaskId}`, 'task');
+        this.blenderBridge?.log?.(`提交场景调整指令: ${instruction}`, 'task');
+
+        try {
+            const result = await this.apiRequest('/blender/edit', {
+                method: 'POST',
+                body: JSON.stringify({
+                    source_task_id: sourceTaskId,
+                    instruction,
+                    description: instruction,
+                    scene_id: this.scene.id || null
+                })
+            });
+
+            if (!result || result.detail) {
+                throw new Error(result?.detail || '场景调整接口调用失败');
+            }
+
+            const taskId = result.task_id;
+            this.setEditStatus(`调整任务 ${taskId} 已启动，正在轮询状态...`, 'task');
+            await this._pollEditTaskStatus(taskId, result.download_url, download);
+            this.showMessage('场景调整完成', 'info');
+        } catch (error) {
+            this.setEditStatus(error.message || '场景调整失败', 'error');
+            this.showMessage('场景调整失败', 'error');
+        } finally {
+            this.setButtonBusy(button, false);
+        }
     }
 
     quickEdit(cmd) {
@@ -432,6 +464,7 @@ class SceneEditorUI extends BaseRoleUI {
                     await this.blenderBridge.generateScene(params, {
                         onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
                         onComplete: task => {
+                            this.rememberBlendTaskId(task.task_id);
                             this.lastDownloadUrl = task.absolute_download_url;
                             this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
                             if (download && this.lastDownloadUrl) {
@@ -474,6 +507,7 @@ class SceneEditorUI extends BaseRoleUI {
 
             const taskStatus = statusData.status;
             if (taskStatus === 'completed') {
+                this.rememberBlendTaskId(taskId);
                 sessionStorage.removeItem('scgs_pending_task');
                 this._setProgress(100);
                 // 后端返回相对路径，用 taskId 拼
@@ -513,6 +547,38 @@ class SceneEditorUI extends BaseRoleUI {
         const label = document.getElementById('generationProgressPct');
         if (bar) bar.style.width = `${pct}%`;
         if (label) label.textContent = `${pct}%`;
+    }
+
+    async _pollEditTaskStatus(taskId, downloadUrl, downloadEl, intervalMs = 2000, maxRetries = 60) {
+        for (let i = 0; i < maxRetries; i++) {
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+
+            const statusData = await this.apiRequest(`/blender/status/${taskId}`);
+            if (!statusData) {
+                this.setEditStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
+                continue;
+            }
+
+            const taskStatus = statusData.status;
+            if (taskStatus === 'completed') {
+                this.rememberBlendTaskId(taskId);
+                this.lastDownloadUrl = statusData.download_url || downloadUrl;
+                this.setEditStatus(`场景调整完成。Task ID: ${taskId}`, 'success');
+                if (downloadEl && this.lastDownloadUrl) {
+                    downloadEl.href = this.lastDownloadUrl;
+                    downloadEl.style.display = 'inline-flex';
+                }
+                return;
+            }
+
+            if (taskStatus === 'failed') {
+                throw new Error(statusData.error || '场景调整任务执行失败');
+            }
+
+            const warnings = statusData.warnings?.length ? ` ⚠ ${statusData.warnings.length}` : '';
+            this.setEditStatus(`调整任务 ${taskId} 处理中...（第 ${i + 1} 次轮询）${warnings}`, 'task');
+        }
+        throw new Error(`调整任务 ${taskId} 超时：轮询 ${maxRetries} 次后仍未完成`);
     }
 
     async runDiagnostics() {
@@ -923,12 +989,40 @@ class SceneEditorUI extends BaseRoleUI {
         status.style.color = this.feedbackColor(type);
     }
 
+    setEditStatus(message, type = 'muted') {
+        const status = document.getElementById('editStatus');
+        if (!status) return;
+        status.textContent = message;
+        status.style.color = this.feedbackColor(type);
+    }
+
     setSceneSaveStatus(message, type = 'success') {
         const status = document.getElementById('sceneSaveStatus');
         if (!status) return;
         status.textContent = message;
         status.style.color = this.feedbackColor(type);
         status.style.display = 'block';
+    }
+
+    sceneBlendTaskStorageKey() {
+        const sceneKey = this.scene?.id || this.scene?.name || 'current';
+        return `smartcity_scene_${sceneKey}_blend_task`;
+    }
+
+    loadSceneBlendTaskId() {
+        return localStorage.getItem(this.sceneBlendTaskStorageKey()) || this.scene?.blenderTaskId || '';
+    }
+
+    rememberBlendTaskId(taskId) {
+        if (!taskId) return;
+        this.lastBlendTaskId = taskId;
+        this.scene.blenderTaskId = taskId;
+        localStorage.setItem(this.sceneBlendTaskStorageKey(), taskId);
+        localStorage.setItem('smartcity_edit_scene', JSON.stringify(this.scene));
+    }
+
+    getEditableBlendTaskId() {
+        return this.lastBlendTaskId || this.loadSceneBlendTaskId();
     }
 
     updateSceneHeader() {
