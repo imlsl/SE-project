@@ -45,6 +45,22 @@ class SceneEditorUI extends BaseRoleUI {
         this.blenderBridge?.init('simulateOutput');
         this.loadAvailableAssets();
         this._loadPendingAssets();
+
+        // 页面刷新后恢复未完成的生成任务轮询
+        const pendingTask = sessionStorage.getItem('scgs_pending_task');
+        if (pendingTask) {
+            try {
+                const { taskId } = JSON.parse(pendingTask);
+                const progressWrap = document.getElementById('generationProgressWrap');
+                const idleEl = document.getElementById('generationIdle');
+                const download = document.getElementById('blendDownloadLink');
+                if (progressWrap) progressWrap.style.display = 'block';
+                if (idleEl) idleEl.style.display = 'none';
+                if (download) download.style.display = 'none';
+                this.setGenerationStatus(`页面刷新，恢复任务 ${taskId} 轮询...`, 'task');
+                this._pollTaskStatus(taskId, download);
+            } catch { sessionStorage.removeItem('scgs_pending_task'); }
+        }
     }
 
     render() {
@@ -138,11 +154,20 @@ class SceneEditorUI extends BaseRoleUI {
                                 <span id="generateImageMeta" style="font-size: 0.7rem; color: #64748b;"></span>
                             </div>
                         </div>
-                        <!-- 下载 + 状态 -->
-                        <div style="display: flex; gap: 0.5rem; align-items: center;">
-                            <a id="blendDownloadLink" class="small-btn outline" href="#" target="_blank" style="display: none; text-decoration: none;"><i class="fas fa-download"></i> 下载 .blend</a>
+                        <!-- 进度 + 状态 + 下载 -->
+                        <div id="generationProgressWrap" style="display: none; margin-top: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                                <div style="flex: 1; background: #1e293b; border-radius: 0.35rem; height: 6px; overflow: hidden;">
+                                    <div id="generationProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); transition: width 0.3s;"></div>
+                                </div>
+                                <span id="generationProgressPct" style="font-size: 0.75rem; color: #38bdf8; min-width: 38px; text-align: right;">0%</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span id="generationStatus" style="font-size: 0.75rem; color: #64748b;"></span>
+                                <a id="blendDownloadLink" class="small-btn outline" style="display: none; text-decoration: none; cursor: pointer;"><i class="fas fa-download"></i> 下载 .blend</a>
+                            </div>
                         </div>
-                        <div id="generationStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">选择模板或输入描述后，点击顶部的「调用 SCGS 生成」即可。</div>
+                        <div id="generationIdle" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">选择模板或输入描述后，点击顶部的「调用 SCGS 生成」即可。</div>
                     </div>
 
                     <div id="editTab_edit" style="margin-top: 0.9rem; display: none;">
@@ -364,6 +389,8 @@ class SceneEditorUI extends BaseRoleUI {
     async generateScene() {
         const button = document.getElementById('generateSceneBtn');
         const statusEl = document.getElementById('generationStatus');
+        const progressWrap = document.getElementById('generationProgressWrap');
+        const idleEl = document.getElementById('generationIdle');
         const download = document.getElementById('blendDownloadLink');
         const params = this.collectGenerationParams();
         if (!params.description && !params.template_id) {
@@ -371,8 +398,12 @@ class SceneEditorUI extends BaseRoleUI {
             return;
         }
 
+        console.log('[generateScene] 开始生成，参数:', params);
         this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 生成中');
         if (download) download.style.display = 'none';
+        if (idleEl) idleEl.style.display = 'none';
+        if (progressWrap) progressWrap.style.display = 'block';
+        this._setProgress(0);
         this.setGenerationStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
 
         try {
@@ -387,11 +418,11 @@ class SceneEditorUI extends BaseRoleUI {
             }
 
             const taskId = result.task_id;
-            const downloadUrl = result.download_url;
-            this.setGenerationStatus(`任务 ${taskId} 已启动，轮询状态中...`, 'task');
+            sessionStorage.setItem('scgs_pending_task', JSON.stringify({ taskId }));
+            this.setGenerationStatus(`任务 ${taskId} 已启动`, 'task');
 
             // 轮询状态（2s 间隔，最多 120s）
-            await this._pollTaskStatus(taskId, downloadUrl, download);
+            await this._pollTaskStatus(taskId, download);
             this.showMessage('SCGS 生成完成', 'info');
         } catch (error) {
             // 后端不可用时降级到 blenderBridge
@@ -406,6 +437,11 @@ class SceneEditorUI extends BaseRoleUI {
                             if (download && this.lastDownloadUrl) {
                                 download.href = this.lastDownloadUrl;
                                 download.style.display = 'inline-flex';
+                                download.innerHTML = '<i class="fas fa-download"></i> 下载 .blend';
+                                download.onclick = (e) => {
+                                    e.preventDefault();
+                                    window.open(this.lastDownloadUrl, '_blank');
+                                };
                             }
                         },
                         onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
@@ -416,20 +452,21 @@ class SceneEditorUI extends BaseRoleUI {
                     this.showMessage('SCGS 生成失败', 'error');
                 }
             } else {
+                sessionStorage.removeItem('scgs_pending_task');
                 this.setGenerationStatus(error.message || '生成失败', 'error');
                 this.showMessage('SCGS 生成失败', 'error');
             }
         } finally {
             this.setButtonBusy(button, false);
-            if (statusEl) statusEl.style.display = 'block';
         }
     }
 
-    async _pollTaskStatus(taskId, downloadUrl, downloadEl, intervalMs = 2000, maxRetries = 60) {
+    async _pollTaskStatus(taskId, downloadEl, intervalMs = 2000, maxRetries = 60) {
         for (let i = 0; i < maxRetries; i++) {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
 
             const statusData = await this.apiRequest(`/blender/status/${taskId}`);
+            console.log(`[poll] 第${i+1}次:`, statusData);
             if (!statusData) {
                 this.setGenerationStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
                 continue;
@@ -437,24 +474,45 @@ class SceneEditorUI extends BaseRoleUI {
 
             const taskStatus = statusData.status;
             if (taskStatus === 'completed') {
-                this.lastDownloadUrl = statusData.download_url || downloadUrl;
-                this.setGenerationStatus(`生成完成。Task ID: ${taskId}`, 'success');
-                if (downloadEl && this.lastDownloadUrl) {
+                sessionStorage.removeItem('scgs_pending_task');
+                this._setProgress(100);
+                // 后端返回相对路径，用 taskId 拼
+                const dl = statusData.download_url || `/blender/download/${taskId}`;
+                this.lastDownloadUrl = dl.startsWith('http') ? dl : `http://127.0.0.1:8000${dl}`;
+                this.setGenerationStatus(`生成完成！`, 'success');
+                if (downloadEl) {
                     downloadEl.href = this.lastDownloadUrl;
                     downloadEl.style.display = 'inline-flex';
+                    downloadEl.innerHTML = '<i class="fas fa-download"></i> 下载 .blend';
+                    // 点击时在新标签打开下载
+                    downloadEl.onclick = (e) => {
+                        e.preventDefault();
+                        window.open(this.lastDownloadUrl, '_blank');
+                    };
                 }
                 return;
             }
 
             if (taskStatus === 'failed') {
-                throw new Error(statusData.error || '任务执行失败');
+                sessionStorage.removeItem('scgs_pending_task');
+                this._setProgress(0);
+                throw new Error(statusData.error || 'Blender 任务执行失败');
             }
 
-            // 仍在 processing
+            // 仍在 processing — 进度基于轮询次数估算（最多到 90%）
+            const pct = Math.min(Math.floor(((i + 1) / maxRetries) * 90), 90);
+            this._setProgress(pct);
             const warnings = statusData.warnings?.length ? ` ⚠${statusData.warnings.length}` : '';
-            this.setGenerationStatus(`任务 ${taskId} 处理中…（第 ${i + 1} 次轮询）${warnings}`, 'task');
+            this.setGenerationStatus(`Blender 生成中…（${pct}%）${warnings}`, 'task');
         }
-        throw new Error(`任务 ${taskId} 超时：轮询 ${maxRetries} 次后仍未完成`);
+        throw new Error(`生成超时：${maxRetries * intervalMs / 1000} 秒未完成`);
+    }
+
+    _setProgress(pct) {
+        const bar = document.getElementById('generationProgressBar');
+        const label = document.getElementById('generationProgressPct');
+        if (bar) bar.style.width = `${pct}%`;
+        if (label) label.textContent = `${pct}%`;
     }
 
     async runDiagnostics() {
