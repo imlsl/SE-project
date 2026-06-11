@@ -8,7 +8,6 @@ class BlenderBridge {
 
     init(outputElementId) {
         this.outputElement = document.getElementById(outputElementId);
-        this.log('SCGS 插件桥接已就绪。');
     }
 
     log(message, type = 'system') {
