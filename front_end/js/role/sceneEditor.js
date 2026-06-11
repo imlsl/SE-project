@@ -355,12 +355,10 @@ class SceneEditorUI extends BaseRoleUI {
         }
 
         this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 调整中');
-        this.logEditAction(`调整任务提交中，源任务: ${sourceTaskId}`, 'task');
+        this.logEditAction(`[system] 调整任务提交中，源任务: ${sourceTaskId}`, 'task');
         this._setEditProgress(0);
-        this.setEditProgressStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
         if (progressWrap) progressWrap.style.display = 'block';
         if (download) download.style.display = 'none';
-        this.blenderBridge?.log?.(`提交场景调整指令: ${instruction}`, 'task');
 
         try {
             const result = await this.apiRequest('/blender/edit', {
@@ -378,7 +376,7 @@ class SceneEditorUI extends BaseRoleUI {
             }
 
             const taskId = result.task_id;
-            this.setEditProgressStatus(`任务 ${taskId} 已启动`, 'task');
+            this.logEditAction(`[system] 调整任务 ${taskId} 已启动`, 'task');
             await this._pollEditTaskStatus(taskId, result.download_url, download);
             this.showMessage('场景调整完成', 'info');
         } catch (error) {
@@ -439,7 +437,7 @@ class SceneEditorUI extends BaseRoleUI {
         if (idleEl) idleEl.style.display = 'none';
         if (progressWrap) progressWrap.style.display = 'block';
         this._setProgress(0);
-        this.setGenerationStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
+        this.logEditAction('[system] 生成任务已提交至后端，等待 Blender 返回状态...', 'task');
 
         try {
             // 优先调用后端 API
@@ -453,45 +451,14 @@ class SceneEditorUI extends BaseRoleUI {
             }
 
             const taskId = result.task_id;
-            sessionStorage.setItem('scgs_pending_task', JSON.stringify({ taskId }));
-            this.setGenerationStatus(`任务 ${taskId} 已启动`, 'task');
+            this.logEditAction(`[system] 生成任务 ${taskId} 已启动`, 'task');
 
             // 轮询状态（2s 间隔，最多 120s）
             await this._pollTaskStatus(taskId, download);
             this.showMessage('SCGS 生成完成', 'info');
         } catch (error) {
-            // 后端不可用时降级到 blenderBridge
-            if (this.blenderBridge) {
-                this.setGenerationStatus('后端不可用，尝试本地 Blender 桥接...', 'task');
-                try {
-                    await this.blenderBridge.generateScene(params, {
-                        onStatus: task => this.setGenerationStatus(this.formatTaskStatus(task), task.status === 'failed' ? 'error' : 'task'),
-                        onComplete: task => {
-                            this.rememberBlendTaskId(task.task_id);
-                            this.lastDownloadUrl = task.absolute_download_url;
-                            this.setGenerationStatus(`生成完成。Task ID: ${task.task_id}`, 'success');
-                            if (download && this.lastDownloadUrl) {
-                                download.href = this.lastDownloadUrl;
-                                download.style.display = 'inline-flex';
-                                download.innerHTML = '<i class="fas fa-download"></i> 下载 .blend';
-                                download.onclick = (e) => {
-                                    e.preventDefault();
-                                    window.open(this.lastDownloadUrl, '_blank');
-                                };
-                            }
-                        },
-                        onFailed: task => this.setGenerationStatus(task.error || '生成失败', 'error')
-                    });
-                    this.showMessage('SCGS 生成完成（本地桥接）', 'info');
-                } catch (bridgeError) {
-                    this.setGenerationStatus(bridgeError.message || '生成失败', 'error');
-                    this.showMessage('SCGS 生成失败', 'error');
-                }
-            } else {
-                sessionStorage.removeItem('scgs_pending_task');
-                this.setGenerationStatus(error.message || '生成失败', 'error');
-                this.showMessage('SCGS 生成失败', 'error');
-            }
+            this.setGenerationStatus(error.message || '生成失败', 'error');
+            this.showMessage('SCGS 生成失败', 'error');
         } finally {
             this.setButtonBusy(button, false);
         }
@@ -591,7 +558,6 @@ class SceneEditorUI extends BaseRoleUI {
                 this.lastDownloadUrl = this.resolveBackendUrl(statusData.download_url || downloadUrl || `/blender/download/${taskId}`);
                 this._setEditProgress(100);
                 this.setEditProgressStatus('场景调整完成', 'success');
-                this.logEditAction(`[system] 场景调整完成。Task ID: ${taskId}`, 'success');
                 if (downloadEl && this.lastDownloadUrl) {
                     downloadEl.href = this.lastDownloadUrl;
                     downloadEl.style.display = 'inline-flex';
@@ -651,20 +617,12 @@ class SceneEditorUI extends BaseRoleUI {
                 return;
             }
             throw new Error('后端返回异常');
-        } catch {
-            // 降级到本地 Blender 桥接
-            if (summary) summary.textContent = '后端不可用，尝试本地 Blender 桥接...';
-            try {
-                const data = await this.blenderBridge.diagnostics();
-                renderDiagnostics(data, 'local bridge');
-                this.logEditAction('[system] Blender bridge ready.', 'system');
-            } catch (bridgeError) {
-                if (summary) {
-                    summary.style.color = '#f87171';
-                    summary.textContent = bridgeError.message || '诊断失败';
-                }
-                this.logEditAction('[system] Blender bridge 诊断失败。', 'error');
+        } catch (error) {
+            if (summary) {
+                summary.style.color = '#f87171';
+                summary.textContent = error.message || '诊断失败';
             }
+            this.logEditAction('[system] Blender bridge 诊断失败。', 'error');
         } finally {
             this.setButtonBusy(button, false);
         }
