@@ -101,7 +101,6 @@ class SceneEditorUI extends BaseRoleUI {
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">城市生成</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="edit">快捷编辑</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="assets">资产</button>
-                        <button class="small-btn outline scene-edit-tab" data-edit-tab="render">渲染</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
                     </div>
 
@@ -191,6 +190,18 @@ class SceneEditorUI extends BaseRoleUI {
                             <button class="small-btn outline quick-edit-btn" data-edit-cmd="add weeds and small garbage on the road surface.">🍂 脏污道路</button>
                         </div>
                         <div id="editStatus" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">编辑指令支持天气切换、白天/夜晚、道路清洁/脏污等操作。请先完成一次 SCGS 生成，再调整生成结果。</div>
+                        <div id="editProgressWrap" style="display: none; margin-top: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                                <div style="flex: 1; background: #1e293b; border-radius: 0.35rem; height: 6px; overflow: hidden;">
+                                    <div id="editProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); transition: width 0.3s;"></div>
+                                </div>
+                                <span id="editProgressPct" style="font-size: 0.75rem; color: #38bdf8; min-width: 38px; text-align: right;">0%</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span id="editProgressStatus" style="font-size: 0.75rem; color: #64748b;"></span>
+                                <a id="editDownloadLink" class="small-btn outline" style="display: none; text-decoration: none; cursor: pointer;"><i class="fas fa-download"></i> 下载 .blend</a>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="editTab_diagnostics" style="margin-top: 0.9rem; display: none;">
@@ -220,22 +231,6 @@ class SceneEditorUI extends BaseRoleUI {
                         <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.35rem;">已选资产（点击 × 移除）</div>
                         <div id="editAssetList" style="font-size: 0.75rem; color: #94a3b8;"></div>
                     </div>
-
-                    <div id="editTab_render" style="margin-top: 0.9rem; display: none;">
-                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                            <select id="renderQualitySelect" style="padding: 0.5rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                <option value="draft">草稿质量</option>
-                                <option value="balanced">均衡质量</option>
-                                <option value="high">高质量</option>
-                            </select>
-                            <button class="small-btn" id="renderSceneBtn">开始渲染演示</button>
-                            <button class="small-btn outline" id="renderDownloadBtn" disabled style="display: none;">下载结果</button>
-                        </div>
-                        <div id="renderResult" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">渲染结果将显示在这里。</div>
-                        <div id="renderPreview" style="margin-top: 0.5rem; padding: 1rem; border: 1px dashed #334155; border-radius: 0.75rem; text-align: center; color: #94a3b8; display: none;">
-                            <div style="height: 140px; border-radius: 0.5rem; background: linear-gradient(135deg, #1e293b, #0f172a); display: flex; align-items: center; justify-content: center;">Render Preview</div>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="glass-card" style="padding: 1.5rem;">
@@ -248,7 +243,6 @@ class SceneEditorUI extends BaseRoleUI {
                     </div>
                     <div style="margin-top: 0.75rem;">
                         <div style="background: #0f172a; border-radius: 0.75rem; padding: 0.75rem; font-family: monospace; font-size: 0.75rem; height: 180px; overflow-y: auto;" id="simulateOutput">
-                            <div style="color: #a78bfa;">[system] Blender bridge ready.</div>
                         </div>
                     </div>
                 </div>
@@ -286,9 +280,6 @@ class SceneEditorUI extends BaseRoleUI {
         document.getElementById('editAssetSearch')?.addEventListener('input', () => this.filterAssetCatalog());
         document.getElementById('editAssetCatalog')?.addEventListener('click', e => this.addAssetFromCatalog(e));
         document.getElementById('editAssetList')?.addEventListener('click', e => this.removeAssetFromClick(e));
-
-        document.getElementById('renderSceneBtn')?.addEventListener('click', () => this.startRender());
-        document.getElementById('renderDownloadBtn')?.addEventListener('click', () => this.downloadRenderPreview());
 
         document.getElementById('copyLogBtn')?.addEventListener('click', () => this.copyLog());
         document.getElementById('clearLogBtn')?.addEventListener('click', () => {
@@ -349,7 +340,8 @@ class SceneEditorUI extends BaseRoleUI {
     async editCity() {
         const instruction = document.getElementById('editInstruction')?.value.trim();
         const button = document.getElementById('editCityBtn');
-        const download = document.getElementById('blendDownloadLink');
+        const download = document.getElementById('editDownloadLink');
+        const progressWrap = document.getElementById('editProgressWrap');
         if (!instruction) {
             this.showMessage('请输入编辑指令', 'error');
             return;
@@ -363,7 +355,11 @@ class SceneEditorUI extends BaseRoleUI {
         }
 
         this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 调整中');
-        this.setEditStatus(`调整任务提交中，源任务: ${sourceTaskId}`, 'task');
+        this.logEditAction(`调整任务提交中，源任务: ${sourceTaskId}`, 'task');
+        this._setEditProgress(0);
+        this.setEditProgressStatus('任务已提交至后端，等待 Blender 返回状态...', 'task');
+        if (progressWrap) progressWrap.style.display = 'block';
+        if (download) download.style.display = 'none';
         this.blenderBridge?.log?.(`提交场景调整指令: ${instruction}`, 'task');
 
         try {
@@ -382,11 +378,18 @@ class SceneEditorUI extends BaseRoleUI {
             }
 
             const taskId = result.task_id;
-            this.setEditStatus(`调整任务 ${taskId} 已启动，正在轮询状态...`, 'task');
+            this.setEditProgressStatus(`任务 ${taskId} 已启动`, 'task');
             await this._pollEditTaskStatus(taskId, result.download_url, download);
             this.showMessage('场景调整完成', 'info');
         } catch (error) {
-            this.setEditStatus(error.message || '场景调整失败', 'error');
+            this._setEditProgress(0);
+            const errorMessage = error.message || '场景调整失败';
+            if (errorMessage.startsWith('TASK_NOT_FOUND:')) {
+                this.setEditProgressStatus(errorMessage.replace('TASK_NOT_FOUND:', ''), 'error');
+            } else {
+                this.setEditProgressStatus(errorMessage, 'error');
+                this.setEditStatus(errorMessage, 'error');
+            }
             this.showMessage('场景调整失败', 'error');
         } finally {
             this.setButtonBusy(button, false);
@@ -512,7 +515,7 @@ class SceneEditorUI extends BaseRoleUI {
                 this._setProgress(100);
                 // 后端返回相对路径，用 taskId 拼
                 const dl = statusData.download_url || `/blender/download/${taskId}`;
-                this.lastDownloadUrl = dl.startsWith('http') ? dl : `http://127.0.0.1:8000${dl}`;
+                this.lastDownloadUrl = this.resolveBackendUrl(dl);
                 this.setGenerationStatus(`生成完成！`, 'success');
                 if (downloadEl) {
                     downloadEl.href = this.lastDownloadUrl;
@@ -549,34 +552,68 @@ class SceneEditorUI extends BaseRoleUI {
         if (label) label.textContent = `${pct}%`;
     }
 
+    _setEditProgress(pct) {
+        const bar = document.getElementById('editProgressBar');
+        const label = document.getElementById('editProgressPct');
+        if (bar) bar.style.width = `${pct}%`;
+        if (label) label.textContent = `${pct}%`;
+    }
+
+    setEditProgressStatus(message, type = 'muted') {
+        const status = document.getElementById('editProgressStatus');
+        if (!status) return;
+        status.textContent = message;
+        status.style.color = this.feedbackColor(type);
+    }
+
     async _pollEditTaskStatus(taskId, downloadUrl, downloadEl, intervalMs = 2000, maxRetries = 60) {
         for (let i = 0; i < maxRetries; i++) {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
 
             const statusData = await this.apiRequest(`/blender/status/${taskId}`);
             if (!statusData) {
-                this.setEditStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
+                this.setEditProgressStatus(`轮询 ${taskId} 失败（第 ${i + 1} 次）`, 'error');
                 continue;
+            }
+
+            if (statusData.status === 'not_found') {
+                this._setEditProgress(0);
+                const notFoundMessage = statusData.error || '场景调整任务不存在';
+                const progressWrap = document.getElementById('editProgressWrap');
+                if (progressWrap) progressWrap.style.display = 'none';
+                this.setEditProgressStatus(notFoundMessage, 'error');
+                throw new Error(`TASK_NOT_FOUND:${notFoundMessage}`);
             }
 
             const taskStatus = statusData.status;
             if (taskStatus === 'completed') {
                 this.rememberBlendTaskId(taskId);
-                this.lastDownloadUrl = statusData.download_url || downloadUrl;
-                this.setEditStatus(`场景调整完成。Task ID: ${taskId}`, 'success');
+                this.lastDownloadUrl = this.resolveBackendUrl(statusData.download_url || downloadUrl || `/blender/download/${taskId}`);
+                this._setEditProgress(100);
+                this.setEditProgressStatus('场景调整完成', 'success');
+                this.logEditAction(`[system] 场景调整完成。Task ID: ${taskId}`, 'success');
                 if (downloadEl && this.lastDownloadUrl) {
                     downloadEl.href = this.lastDownloadUrl;
                     downloadEl.style.display = 'inline-flex';
+                    downloadEl.innerHTML = '<i class="fas fa-download"></i> 下载 .blend';
+                    downloadEl.onclick = (e) => {
+                        e.preventDefault();
+                        window.open(this.lastDownloadUrl, '_blank');
+                    };
                 }
                 return;
             }
 
             if (taskStatus === 'failed') {
+                this._setEditProgress(0);
+                this.setEditProgressStatus(statusData.error || '场景调整任务执行失败', 'error');
                 throw new Error(statusData.error || '场景调整任务执行失败');
             }
 
             const warnings = statusData.warnings?.length ? ` ⚠ ${statusData.warnings.length}` : '';
-            this.setEditStatus(`调整任务 ${taskId} 处理中...（第 ${i + 1} 次轮询）${warnings}`, 'task');
+            const pct = Math.min(Math.floor(((i + 1) / maxRetries) * 90), 90);
+            this._setEditProgress(pct);
+            this.setEditProgressStatus(`场景调整中…（${pct}%）${warnings}`, 'task');
         }
         throw new Error(`调整任务 ${taskId} 超时：轮询 ${maxRetries} 次后仍未完成`);
     }
@@ -610,6 +647,7 @@ class SceneEditorUI extends BaseRoleUI {
             const backendData = await this.apiRequest('/blender/diagnostics');
             if (backendData && !backendData.detail) {
                 renderDiagnostics(backendData, 'backend');
+                this.logEditAction('[system] Blender bridge ready.', 'system');
                 return;
             }
             throw new Error('后端返回异常');
@@ -619,11 +657,13 @@ class SceneEditorUI extends BaseRoleUI {
             try {
                 const data = await this.blenderBridge.diagnostics();
                 renderDiagnostics(data, 'local bridge');
+                this.logEditAction('[system] Blender bridge ready.', 'system');
             } catch (bridgeError) {
                 if (summary) {
                     summary.style.color = '#f87171';
                     summary.textContent = bridgeError.message || '诊断失败';
                 }
+                this.logEditAction('[system] Blender bridge 诊断失败。', 'error');
             }
         } finally {
             this.setButtonBusy(button, false);
@@ -812,44 +852,6 @@ class SceneEditorUI extends BaseRoleUI {
         }
     }
 
-    startRender() {
-        const button = document.getElementById('renderSceneBtn');
-        const quality = document.getElementById('renderQualitySelect')?.value || 'balanced';
-        const result = document.getElementById('renderResult');
-        const preview = document.getElementById('renderPreview');
-        const downloadBtn = document.getElementById('renderDownloadBtn');
-        this.setButtonBusy(button, true, '<i class="fas fa-spinner fa-pulse"></i> 渲染中');
-        if (downloadBtn) {
-            downloadBtn.style.display = 'none';
-            downloadBtn.disabled = true;
-        }
-        if (preview) preview.style.display = 'block';
-        if (result) {
-            result.textContent = `渲染演示任务已提交（质量: ${this.renderQualityLabel(quality)}）。`;
-            result.style.color = '#38bdf8';
-        }
-        setTimeout(() => {
-            if (result) {
-                result.textContent = `渲染演示完成（质量: ${this.renderQualityLabel(quality)}）。`;
-                result.style.color = '#10b981';
-            }
-            if (downloadBtn) {
-                downloadBtn.style.display = 'inline-flex';
-                downloadBtn.disabled = false;
-            }
-            this.setButtonBusy(button, false);
-        }, 900);
-    }
-
-    downloadRenderPreview() {
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="100%" height="100%" fill="#0f172a"/><text x="50%" y="50%" fill="#94a3b8" font-size="24" font-family="Arial" dominant-baseline="middle" text-anchor="middle">Render Preview</text></svg>`;
-        const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'render_preview.svg';
-        link.click();
-    }
-
     async copyLog() {
         const output = document.getElementById('simulateOutput');
         const text = output?.innerText || '';
@@ -873,7 +875,7 @@ class SceneEditorUI extends BaseRoleUI {
 
     switchEditTab(tab) {
         this.activeTab = tab;
-        ['generate', 'edit', 'diagnostics', 'assets', 'render'].forEach(key => {
+        ['generate', 'edit', 'diagnostics', 'assets'].forEach(key => {
             const panel = document.getElementById(`editTab_${key}`);
             if (panel) panel.style.display = key === tab ? 'block' : 'none';
         });
@@ -1045,6 +1047,12 @@ class SceneEditorUI extends BaseRoleUI {
         button.disabled = false;
     }
 
+    resolveBackendUrl(url) {
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+        return `http://127.0.0.1:8000${url.startsWith('/') ? url : `/${url}`}`;
+    }
+
     logEditAction(message, type = 'task') {
         this.blenderBridge?.log?.(message, type);
     }
@@ -1057,14 +1065,6 @@ class SceneEditorUI extends BaseRoleUI {
             warning: '#f59e0b',
             muted: '#64748b'
         }[type] || '#64748b';
-    }
-
-    renderQualityLabel(value) {
-        return {
-            draft: '草稿质量',
-            balanced: '均衡质量',
-            high: '高质量'
-        }[value] || value;
     }
 
     escapeHTML(value) {
