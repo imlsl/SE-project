@@ -23,7 +23,9 @@ class SceneModelerUI extends BaseRoleUI {
                 <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1rem;">
                     <div class="panel-title">
                         <i class="fas fa-cube"></i> 场景建模工作台
-                        <span style="font-size: 0.8rem; margin-left: auto; color: #38bdf8;">${this.username}</span>
+                        <div style="margin-left: auto; display: flex; align-items: center; gap: 0.75rem;">
+                            <button class="small-btn outline" id="launchBlenderBtn"> 进入 Blender</button>
+                        </div>
                     </div>
                     <p style="color: #94a3b8; margin-bottom: 1rem;"><i class="fas fa-map-pin"></i> 场景项目管理 · 资产库维护 · 3D 城市建模</p>
 
@@ -266,6 +268,29 @@ class SceneModelerUI extends BaseRoleUI {
         }
     }
 
+    // 弹出简洁的跳转提示
+    showBlenderModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'blender-modal-overlay';
+        
+        overlay.innerHTML = `
+            <div class="blender-modal">
+                
+                <p>正在跳转到 Blender...</p>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        // 尝试跳转
+        window.location.href = 'blender://open?project=smartcity';
+        
+        // 2秒后自动关闭弹窗
+        setTimeout(() => {
+            overlay.remove();
+        }, 2000);
+    }
+
     bindEvents() {
         // 创建场景 — 内联表单
         document.getElementById('createSceneBtn')?.addEventListener('click', () => this.toggleSceneForm(true));
@@ -294,6 +319,12 @@ class SceneModelerUI extends BaseRoleUI {
                 this.refreshStats();
                 this.showMessage('资产库已刷新', 'info');
             });
+        }
+
+        // 进入 Blender 按钮
+        const launchBlenderBtn = document.getElementById('launchBlenderBtn');
+        if (launchBlenderBtn) {
+            launchBlenderBtn.addEventListener('click', () => this.showBlenderModal());
         }
 
         this.bindSceneEvents();
