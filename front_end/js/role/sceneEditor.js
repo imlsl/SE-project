@@ -388,6 +388,7 @@ class SceneEditorUI extends BaseRoleUI {
                 this.setEditProgressStatus(errorMessage.replace('TASK_NOT_FOUND:', ''), 'error');
             } else {
                 this.setEditProgressStatus(errorMessage, 'error');
+                this.setEditStatus(errorMessage, 'error');
             }
             this.showMessage('场景调整失败', 'error');
         } finally {
