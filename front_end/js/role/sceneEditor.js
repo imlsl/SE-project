@@ -100,22 +100,19 @@ class SceneEditorUI extends BaseRoleUI {
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="generate">城市生成</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="edit">快捷编辑</button>
+                        <button class="small-btn outline scene-edit-tab" data-edit-tab="template">模板</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="assets">资产</button>
                         <button class="small-btn outline scene-edit-tab" data-edit-tab="diagnostics">诊断</button>
                     </div>
 
                     <div id="editTab_generate" style="margin-top: 0.9rem;">
-                        <!-- 第一行：自然语言描述 / AI 指令 -->
+                        <!-- 第一行：自然语言描述 -->
                         <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; margin-bottom: 0.75rem;">
-                            自然语言描述 / AI 指令
-                            <textarea id="generateDescription" placeholder="例如：请生成一座雨天的现代城市  或  树木1, 道路2, 座椅1  或  模板0  或  古典风格" style="min-height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;"></textarea>
+                            自然语言描述
+                            <textarea id="generateDescription" placeholder="例如：请生成一座雨天的现代城市" style="min-height: 72px; padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;"></textarea>
                             <input type="hidden" id="editTemplateId" value="">
                         </label>
-                        <!-- 第二行：模板按钮 -->
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                            ${this.renderTemplatePresetButtons()}
-                        </div>
-                        <!-- 第三行：道路类型 + 天气 -->
+                        <!-- 第二行：道路类型 + 天气 -->
                         <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
                             <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; flex: 1;">
                                 道路类型
@@ -124,15 +121,6 @@ class SceneEditorUI extends BaseRoleUI {
                                     <option value="2" selected>2 - 扩展网格布局（默认）</option>
                                     <option value="3">3 - 图像识别提取</option>
                                     <option value="4">4 - 手动布局</option>
-                                </select>
-                            </label>
-                            <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; flex: 1;">
-                                天气
-                                <select id="generateWeather" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
-                                    <option value="">插件默认</option>
-                                    <option value="sunny">晴天</option>
-                                    <option value="rainy">雨天</option>
-                                    <option value="snowy">雪天</option>
                                 </select>
                             </label>
                         </div>
@@ -169,6 +157,20 @@ class SceneEditorUI extends BaseRoleUI {
                             </div>
                         </div>
                         <div id="generationIdle" style="margin-top: 0.6rem; font-size: 0.78rem; color: #64748b;">选择模板或输入描述后，点击顶部的「调用 SCGS 生成」即可。</div>
+                    </div>
+
+                    <div id="editTab_template" style="margin-top: 0.9rem; display: none;">
+                        <!-- AI 指令 -->
+                        <label style="display: grid; gap: 0.35rem; color: #94a3b8; font-size: 0.82rem; margin-bottom: 0.75rem;">
+                            AI 自然语言指令
+                            <input id="aiInstruction" placeholder="例如：树木1, 道路2, 座椅1  或  模板4  或  古典风格" style="padding: 0.6rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                        </label>
+                        <!-- 模板按钮 -->
+                        <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.5rem;">模板预设（点击选中）</div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                            ${this.renderTemplatePresetButtons()}
+                        </div>
+                        <div style="font-size: 0.78rem; color: #64748b;">模板详情：现代（树木1·道路2·座椅1）、古典（树木2·道路1·座椅2）、生态（树木3·道路3·座椅3）、工业（树木1·道路4·座椅1）、地域（树木4·道路2·座椅4）</div>
                     </div>
 
                     <div id="editTab_edit" style="margin-top: 0.9rem; display: none;">
@@ -425,8 +427,8 @@ class SceneEditorUI extends BaseRoleUI {
         const idleEl = document.getElementById('generationIdle');
         const download = document.getElementById('blendDownloadLink');
         const params = this.collectGenerationParams();
-        if (!params.description && !params.template_id) {
-            this.showMessage('请填写描述或模板 ID', 'error');
+        if (!params.description) {
+            this.showMessage('请填写自然语言描述', 'error');
             return;
         }
 
@@ -680,23 +682,27 @@ class SceneEditorUI extends BaseRoleUI {
     }
 
     selectTemplatePreset(templateId) {
-        // 写入隐藏字段，供 collectGenerationParams 读取
         const hidden = document.getElementById('editTemplateId');
-        if (hidden) hidden.value = templateId || '';
+        const isCurrentlySelected = hidden && hidden.value === templateId;
 
-        // 按钮高亮切换
+        if (isCurrentlySelected) {
+            // 取消选中
+            if (hidden) hidden.value = '';
+            document.querySelectorAll('[data-template-preset]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            this.setGenerationStatus('已取消模板选择', 'muted');
+            return;
+        }
+
+        // 选中
+        if (hidden) hidden.value = templateId || '';
         document.querySelectorAll('[data-template-preset]').forEach(btn => {
             btn.classList.toggle('active', btn.getAttribute('data-template-preset') === templateId);
         });
 
-        // 同步填入描述框（方便用户看到选了哪个模板，也可以继续编辑）
-        const desc = document.getElementById('generateDescription');
         const template = this.templatePresets.find(item => item.id === templateId);
         if (template) {
-            const presetText = `模板${template.id} - ${template.name}`;
-            if (!desc.value.trim() || /^模板\d/.test(desc.value.trim())) {
-                desc.value = presetText;
-            }
             this.setGenerationStatus(`已选择模板 ${template.id}: ${template.name}（${template.detail}）`, 'success');
         }
     }
@@ -832,7 +838,7 @@ class SceneEditorUI extends BaseRoleUI {
 
     switchEditTab(tab) {
         this.activeTab = tab;
-        ['generate', 'edit', 'diagnostics', 'assets'].forEach(key => {
+        ['generate', 'edit', 'template', 'diagnostics', 'assets'].forEach(key => {
             const panel = document.getElementById(`editTab_${key}`);
             if (panel) panel.style.display = key === tab ? 'block' : 'none';
         });
