@@ -4395,9 +4395,9 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             # 雪天参数
             collection = "snow"
             snow_loaction = (-50, 0, 50)
-            snow_scale = (0, 0, 0)
+            snow_scale = (50, 50, 50)
             snow_ground_loaction = (-50, 0, 6.2779)
-            snow_ground_dimensions = (0, 0, 0)
+            snow_ground_dimensions = (250, 150, 6.277)
             # snow_ground_dimensions = (120, 120, 2)
             density = 0.8  # 雪密度
             thickness = 0.5  # 雪厚度
