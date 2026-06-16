@@ -39,6 +39,7 @@ from skimage.morphology import skeletonize
 import sknw
 import networkx as nx
 from scipy.spatial import cKDTree
+from mathutils import Vector
 
 # 导入模板相关模块
 try:
@@ -52,6 +53,1506 @@ except ImportError as e:
             return None
     class ConfigParser:
         pass
+
+AI_SUPPORTED_SCENE_ACTIONS = (
+    "set_weather_sunny",
+    "set_weather_rainy",
+    "set_weather_snowy",
+    "set_time_day",
+    "set_time_night",
+    "darken_sky",
+    "brighten_sky",
+    "clean_road",
+    "dirty_road",
+    "turn_street_lights_on",
+    "turn_street_lights_off",
+)
+def _call_openai_responses_api(system_prompt, user_prompt, schema_name, schema, max_output_tokens=800):
+    settings = _get_ai_settings()
+    if not settings["api_key"]:
+        raise RuntimeError("Missing OpenAI API key")
+
+    request_body = {
+        "model": settings["model"],
+        "input": [
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": system_prompt}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_prompt}],
+            },
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "schema": schema,
+                "strict": True,
+            }
+        },
+        "reasoning": {"effort": "low"},
+        "max_output_tokens": max_output_tokens,
+    }
+
+    request = urllib.request.Request(
+        _build_responses_endpoint(settings["base_url"]),
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings['api_key']}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"OpenAI request failed: {error.code} {details}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"OpenAI request failed: {error.reason}") from error
+
+    return _extract_json_object(_extract_text_from_responses_payload(payload))
+
+
+def _plan_city_from_prompt(description):
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "city_type": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "classical type",
+                        "ancient type",
+                        "modern type",
+                        "Taiwanese type",
+                        "industrial type",
+                    ],
+                },
+            },
+            "weather": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {"type": "string", "enum": ["sunny", "rainy", "snowy"]},
+            },
+        },
+        "required": ["city_type", "weather"],
+    }
+    system_prompt = (
+        "You are a 3D city planning assistant for a Blender addon. "
+        "Read the user's scene description and return only structured planning data."
+    )
+    try:
+        return _call_openai_responses_api(
+            system_prompt=system_prompt,
+            user_prompt=description,
+            schema_name="city_generation_plan",
+            schema=schema,
+            max_output_tokens=300,
+        )
+    except Exception as error:
+        print(f"[SCGS AI] City generation planning fell back to local parser: {error}")
+        return _fallback_city_plan(description)
+
+
+def _fallback_city_plan(description):
+    text = (description or "").strip().lower()
+    lowered = text.replace(" ", "")
+
+    city_type = "classical type"
+    if any(token in lowered for token in ("taiwan", "台湾", "台灣")):
+        city_type = "Taiwanese type"
+    elif any(token in lowered for token in ("industrial", "industry", "工业", "工業")):
+        city_type = "industrial type"
+    elif any(token in lowered for token in ("ancient", "古代", "古风", "古風")):
+        city_type = "ancient type"
+    elif any(token in lowered for token in ("modern", "现代", "現代")):
+        city_type = "modern type"
+    elif any(token in lowered for token in ("classic", "classical", "retro", "复古", "復古", "古典")):
+        city_type = "classical type"
+
+    weather = "sunny"
+    if any(token in lowered for token in ("snow", "snowy", "雪")):
+        weather = "snowy"
+    elif any(token in lowered for token in ("rain", "rainy", "雨")):
+        weather = "rainy"
+    elif any(token in lowered for token in ("sunny", "clear", "晴", "白天", "白昼", "白晝")):
+        weather = "sunny"
+
+    return {
+        "city_type": [city_type],
+        "weather": [weather],
+    }
+
+
+def _fallback_scene_actions(command_text):
+    text = (command_text or "").strip().lower()
+    lowered = text.replace(" ", "")
+    actions = []
+
+    if any(token in lowered for token in ("\u96e8", "rain")):
+        actions.append("set_weather_rainy")
+    if any(token in lowered for token in ("\u96ea", "snow")):
+        actions.append("set_weather_snowy")
+    if any(token in lowered for token in ("\u6674", "sunny", "clearweather", "\u597d\u5929")):
+        actions.append("set_weather_sunny")
+
+    if any(token in lowered for token in ("\u591c", "night", "darkmode")):
+        actions.append("set_time_night")
+    elif any(token in lowered for token in ("\u767d\u5929", "\u767d\u663c", "day", "\u5929\u4eae")):
+        actions.append("set_time_day")
+
+    if any(token in lowered for token in ("\u53d8\u6697", "\u6697\u4e00\u70b9", "darker", "dim")):
+        actions.append("darken_sky")
+    if any(token in lowered for token in ("\u53d8\u4eae", "\u4eae\u4e00\u70b9", "brighten", "brighter")):
+        actions.append("brighten_sky")
+
+    if any(token in lowered for token in ("\u5e72\u51c0", "clean", "\u6e05\u7406", "\u6574\u6d01")):
+        actions.append("clean_road")
+    if any(token in lowered for token in ("\u810f", "dirty", "\u843d\u53f6", "\u5783\u573e")):
+        actions.append("dirty_road")
+
+    if any(token in lowered for token in ("\u5f00\u706f", "\u4eae\u706f", "lights on", "streetlighton")):
+        actions.append("turn_street_lights_on")
+    if any(token in lowered for token in ("\u5173\u706f", "\u706d\u706f", "lights off", "streetlightoff")):
+        actions.append("turn_street_lights_off")
+
+    deduped_actions = []
+    seen = set()
+    for action in actions:
+        if action not in seen:
+            seen.add(action)
+            deduped_actions.append(action)
+
+    if not deduped_actions:
+        deduped_actions = ["darken_sky"] if text else []
+
+    return {
+        "actions": [{"name": action} for action in deduped_actions],
+        "summary": "Used local keyword fallback parser.",
+    }
+
+
+def _plan_scene_actions(command_text):
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "enum": list(AI_SUPPORTED_SCENE_ACTIONS),
+                        }
+                    },
+                    "required": ["name"],
+                },
+            },
+            "summary": {"type": "string"},
+        },
+        "required": ["actions", "summary"],
+    }
+    system_prompt = (
+        "You control a Blender city scene through a fixed action list. "
+        "Return only actions that are directly supported by the addon, preserving order. "
+        "Never invent new tools or code. If the user asks for a brighter scene, use brighten_sky. "
+        "If the user asks for a darker scene, use darken_sky. "
+        "If the user asks for rainy, snowy, or sunny weather, use the matching weather action."
+    )
+
+    try:
+        return _call_openai_responses_api(
+            system_prompt=system_prompt,
+            user_prompt=command_text,
+            schema_name="scene_edit_plan",
+            schema=schema,
+            max_output_tokens=400,
+        )
+    except Exception:
+        return _fallback_scene_actions(command_text)
+def ground_car_asset(target_z=0.0):
+    candidate_keys = ("car_mesh", "traffic", "杞﹁締", "base")
+    candidates = []
+    for obj in bpy.data.objects:
+        name_lower = obj.name.lower()
+        if any(key in name_lower or key in obj.name for key in candidate_keys):
+            candidates.append(obj)
+
+    if not candidates:
+        return
+
+    min_z = None
+    for obj in candidates:
+        if not getattr(obj, "bound_box", None):
+            continue
+        corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        if not corners:
+            continue
+        obj_min_z = min(corner.z for corner in corners)
+        min_z = obj_min_z if min_z is None else min(min_z, obj_min_z)
+
+    if min_z is None:
+        return
+
+    delta_z = target_z - min_z
+    for obj in candidates:
+        obj.location.z += delta_z
+
+
+def _vehicle_source_min_z():
+    vehicle_collection = _pick_latest_named(bpy.data.collections, "杞﹁締")
+    if vehicle_collection is None:
+        return None
+
+    min_z = None
+    for obj in vehicle_collection.all_objects:
+        obj_min_z = _object_world_min_z(obj)
+        if obj_min_z is None:
+            continue
+        min_z = obj_min_z if min_z is None else min(min_z, obj_min_z)
+    return min_z
+
+
+def settle_traffic_nodes(offset_z=None, traffic_obj=None):
+    if traffic_obj is None:
+        traffic_obj = _find_latest_traffic_object()
+    if traffic_obj is None:
+        return
+
+    if offset_z is None:
+        offset_z = 0.02
+
+    for modifier in traffic_obj.modifiers:
+        if modifier.type != "NODES" or not modifier.node_group:
+            continue
+
+        node = modifier.node_group.nodes.get("Set Position.007")
+        if node and "Offset" in node.inputs:
+            offset = list(node.inputs["Offset"].default_value)
+            offset[2] = offset_z
+            node.inputs["Offset"].default_value = offset
+
+        break
+
+
+def _get_traffic_offset_z(traffic_obj=None):
+    if traffic_obj is None:
+        traffic_obj = _find_latest_traffic_object()
+    if traffic_obj is None:
+        return None
+
+    for modifier in traffic_obj.modifiers:
+        if modifier.type != "NODES" or not modifier.node_group:
+            continue
+
+        node = modifier.node_group.nodes.get("Set Position.007")
+        if node and "Offset" in node.inputs:
+            return float(node.inputs["Offset"].default_value[2])
+
+        break
+
+    return None
+
+
+def _name_version(name, base_name):
+    if name == base_name:
+        return 0
+    match = re.fullmatch(rf"{re.escape(base_name)}\.(\d+)", name)
+    if match:
+        return int(match.group(1))
+    return -1
+
+
+def _pick_latest_named(items, base_name):
+    candidates = [item for item in items if _name_version(item.name, base_name) >= 0]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: _name_version(item.name, base_name))
+
+
+def _find_latest_traffic_object(collection=None):
+    search_space = collection.all_objects if collection is not None else bpy.data.objects
+    return _pick_latest_named(search_space, "traffic")
+
+
+def _find_latest_carmesh_object(collection=None):
+    search_space = collection.all_objects if collection is not None else bpy.data.objects
+    return _pick_latest_named(search_space, "car_mesh")
+
+
+def _find_traffic_node_group(traffic_obj=None):
+    if traffic_obj is None:
+        traffic_obj = _find_latest_traffic_object()
+    if traffic_obj is None:
+        return None
+
+    for modifier in traffic_obj.modifiers:
+        if modifier.type == "NODES" and modifier.node_group:
+            # Try "Object Info.001" first, then fallback to "Object Info"
+            ng = modifier.node_group
+            if "Object Info.001" in ng.nodes or "Object Info" in ng.nodes:
+                return ng
+    return None
+
+
+def _find_city_road_graph_source_object():
+    # 直接使用 ICity Base 作为路网来源（ICity Road 的 Object Info 可能指向局部元素）
+    base_obj = bpy.data.objects.get("ICity Base")
+    if base_obj is not None and base_obj.type == "MESH":
+        print(f"[SCGS] Using ICity Base as road graph source ({len(base_obj.data.vertices)} verts)")
+        return base_obj
+    return None
+
+
+def _find_node_socket(sockets, socket_name):
+    for socket in sockets:
+        if socket.name == socket_name or socket.identifier == socket_name:
+            return socket
+    return None
+
+
+def _ensure_traffic_curve_index_link(node_group):
+    sample_curve = node_group.nodes.get("Sample Curve")
+    curve_index_source = node_group.nodes.get("Math.033")
+    if sample_curve is None or curve_index_source is None:
+        return False
+
+    curve_index_input = _find_node_socket(sample_curve.inputs, "Curve Index")
+    source_output = _find_node_socket(curve_index_source.outputs, "Value")
+    if curve_index_input is None or source_output is None:
+        return False
+
+    for link in list(curve_index_input.links):
+        if link.from_node == curve_index_source and link.from_socket == source_output:
+            return True
+        node_group.links.remove(link)
+
+    node_group.links.new(source_output, curve_index_input)
+    return True
+
+
+def _get_object_info_node(node_group):
+    """Get the Object Info node (handles both 'Object Info.001' and 'Object Info' naming)."""
+    if "Object Info.001" in node_group.nodes:
+        return node_group.nodes["Object Info.001"]
+    return node_group.nodes.get("Object Info")
+
+def _bind_path_object_to_traffic(path_obj, traffic_obj=None):
+    node_group = _find_traffic_node_group(traffic_obj)
+    if node_group is None:
+        raise RuntimeError("Traffic node group not found")
+    obj_info = _get_object_info_node(node_group)
+    if obj_info is None:
+        raise RuntimeError("Object Info node not found in traffic node group")
+    obj_info.inputs[0].default_value = path_obj
+    for node in [node for node in list(node_group.nodes) if node.name.startswith("SCGS Stopline") or node.name == "SCGS Traffic Red State"]:
+        node_group.nodes.remove(node)
+    _ensure_traffic_curve_index_link(node_group)
+    return node_group
+
+
+def _build_or_update_path_object(name, vertices, edges, collection_name="car_mesh"):
+    path_obj = bpy.data.objects.get(name)
+    if path_obj is None:
+        mesh = bpy.data.meshes.new(name)
+        path_obj = bpy.data.objects.new(name, mesh)
+    else:
+        mesh = path_obj.data
+        if mesh is None:
+            mesh = bpy.data.meshes.new(name)
+            path_obj.data = mesh
+        else:
+            mesh.clear_geometry()
+
+    target_collection = bpy.data.collections.get(collection_name)
+    if target_collection is None:
+        target_collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(target_collection)
+
+    for coll in list(path_obj.users_collection):
+        coll.objects.unlink(path_obj)
+    if path_obj.name not in target_collection.objects:
+        target_collection.objects.link(path_obj)
+
+    bm = bmesh.new()
+    for vertex in vertices:
+        bm.verts.new(vertex)
+    bm.verts.ensure_lookup_table()
+    for start, end in edges:
+        if start == end:
+            continue
+        try:
+            bm.edges.new((bm.verts[start], bm.verts[end]))
+        except ValueError:
+            pass
+    bm.to_mesh(path_obj.data)
+    bm.free()
+    path_obj.data.update()
+
+    path_obj.location = (0.0, 0.0, 0.0)
+    path_obj.rotation_euler = (0.0, 0.0, 0.0)
+    path_obj.scale = (1.0, 1.0, 1.0)
+    path_obj.display_type = 'WIRE'
+    path_obj.hide_select = True
+    path_obj.hide_render = True
+    path_obj.hide_viewport = True
+    return path_obj
+
+
+def _extract_path_graph_from_object(obj):
+    if obj is None or obj.type != 'MESH':
+        return [], []
+    obj.update_from_editmode()
+    mesh = obj.data
+    road_del_attr = mesh.attributes.get("Road del")
+
+    # 计算所有顶点的世界坐标
+    world_verts = [tuple(obj.matrix_world @ v.co) for v in mesh.vertices]
+
+    kept_edges = []
+    for edge in mesh.edges:
+        keep_edge = True
+        # 优先使用 Road del 属性过滤
+        if road_del_attr is not None and road_del_attr.domain == 'EDGE' and len(road_del_attr.data) > edge.index:
+            keep_edge = not bool(road_del_attr.data[edge.index].value)
+        if keep_edge and road_del_attr is None:
+            # 没有 Road del 属性时，按边长过滤掉建筑物的长边
+            v0_co = world_verts[edge.vertices[0]]
+            v1_co = world_verts[edge.vertices[1]]
+            dx = v0_co[0] - v1_co[0]
+            dy = v0_co[1] - v1_co[1]
+            length = (dx*dx + dy*dy)**0.5
+            if length > 20.0:
+                keep_edge = False
+        if keep_edge:
+            kept_edges.append(tuple(edge.vertices))
+
+    if not kept_edges:
+        return [], []
+
+    used_indices = sorted({index for edge in kept_edges for index in edge})
+    index_map = {old_index: new_index for new_index, old_index in enumerate(used_indices)}
+    vertices = [world_verts[index] for index in used_indices]
+    edges = [(index_map[start], index_map[end]) for start, end in kept_edges]
+    return vertices, edges
+
+
+def _build_closed_walk_from_graph(graph):
+    if graph.number_of_edges() == 0:
+        return []
+
+    start_node = max(graph.degree, key=lambda item: item[1])[0]
+    walked_edges = []
+    visited = set()
+
+    def dfs(node):
+        neighbors = sorted(graph.neighbors(node))
+        for neighbor in neighbors:
+            edge_key = tuple(sorted((node, neighbor)))
+            if edge_key in visited:
+                continue
+            visited.add(edge_key)
+            walked_edges.append((node, neighbor))
+            dfs(neighbor)
+            walked_edges.append((neighbor, node))
+
+    dfs(start_node)
+    return walked_edges
+
+
+def _build_cyclic_route_from_graph(vertices, edges):
+    if not vertices or not edges:
+        return [], []
+
+    graph = nx.Graph()
+    for index, coord in enumerate(vertices):
+        graph.add_node(index, co=tuple(coord))
+
+    for start, end in edges:
+        if start == end:
+            continue
+        start_co = vertices[start]
+        end_co = vertices[end]
+        dx = start_co[0] - end_co[0]
+        dy = start_co[1] - end_co[1]
+        dz = start_co[2] - end_co[2]
+        length = (dx * dx + dy * dy + dz * dz) ** 0.5
+        if length <= 1e-6:
+            continue
+        graph.add_edge(start, end, weight=length)
+
+    if graph.number_of_edges() == 0:
+        return [], []
+
+    if not nx.is_connected(graph):
+        largest_component = max(nx.connected_components(graph), key=len)
+        graph = graph.subgraph(largest_component).copy()
+
+    if graph.number_of_edges() == 0:
+        return [], []
+
+    walked_edges = []
+    try:
+        euler_graph = nx.MultiGraph(graph) if nx.is_eulerian(graph) else nx.eulerize(graph)
+        walked_edges = list(nx.eulerian_circuit(euler_graph))
+    except Exception:
+        walked_edges = _build_closed_walk_from_graph(graph)
+
+    if not walked_edges:
+        return [], []
+
+    route_vertices = []
+    route_edges = []
+
+    def append_route_vertex(coord):
+        route_vertices.append((float(coord[0]), float(coord[1]), float(coord[2])))
+        return len(route_vertices) - 1
+
+    first_node = walked_edges[0][0]
+    first_index = append_route_vertex(graph.nodes[first_node]["co"])
+    previous_index = first_index
+    current_node = first_node
+
+    for start, end in walked_edges:
+        if start != current_node:
+            start_index = append_route_vertex(graph.nodes[start]["co"])
+            route_edges.append((previous_index, start_index))
+            previous_index = start_index
+        end_index = append_route_vertex(graph.nodes[end]["co"])
+        route_edges.append((previous_index, end_index))
+        previous_index = end_index
+        current_node = end
+
+    first_coord = route_vertices[first_index]
+    last_coord = route_vertices[previous_index]
+    if last_coord != first_coord:
+        closing_index = append_route_vertex(first_coord)
+        route_edges.append((previous_index, closing_index))
+
+    return route_vertices, route_edges
+
+
+def _build_main_road_route_from_graph(vertices, edges):
+    if not vertices or not edges:
+        return [], []
+
+    graph = nx.Graph()
+    for index, coord in enumerate(vertices):
+        graph.add_node(index, co=tuple(coord))
+
+    for start, end in edges:
+        if start == end:
+            continue
+        start_co = vertices[start]
+        end_co = vertices[end]
+        dx = start_co[0] - end_co[0]
+        dy = start_co[1] - end_co[1]
+        dz = start_co[2] - end_co[2]
+        length = (dx * dx + dy * dy + dz * dz) ** 0.5
+        if length <= 1e-6:
+            continue
+        graph.add_edge(start, end, weight=length)
+
+    if graph.number_of_edges() == 0:
+        return [], []
+
+    if not nx.is_connected(graph):
+        largest_component = max(nx.connected_components(graph), key=len)
+        graph = graph.subgraph(largest_component).copy()
+
+    if graph.number_of_edges() == 0:
+        return [], []
+
+    def farthest_node_from(source):
+        lengths = nx.single_source_dijkstra_path_length(graph, source, weight="weight")
+        return max(lengths, key=lengths.get)
+
+    start_node = max(graph.degree, key=lambda item: item[1])[0]
+    end_a = farthest_node_from(start_node)
+    end_b = farthest_node_from(end_a)
+
+    try:
+        main_path = nx.shortest_path(graph, end_a, end_b, weight="weight")
+    except Exception:
+        main_path = list(nx.dfs_preorder_nodes(graph, source=end_a))
+
+    if len(main_path) < 2:
+        return [], []
+
+    # Return along the same route so the WRAP at the end happens at the same
+    # coordinate instead of jumping across the city.
+    route_nodes = list(main_path)
+    if len(main_path) > 2:
+        route_nodes.extend(reversed(main_path[1:-1]))
+    route_nodes.append(main_path[0])
+
+    route_vertices = [tuple(float(value) for value in graph.nodes[node]["co"]) for node in route_nodes]
+    route_edges = [(index, index + 1) for index in range(len(route_vertices) - 1)]
+    return route_vertices, route_edges
+
+
+def _compute_route_cumulative_lengths(route_vertices):
+    if not route_vertices:
+        return []
+
+    cumulative = [0.0]
+    total = 0.0
+    for index in range(1, len(route_vertices)):
+        previous = Vector(route_vertices[index - 1])
+        current = Vector(route_vertices[index])
+        total += (current - previous).length
+        cumulative.append(total)
+    return cumulative
+
+
+def _sample_route_position_at_distance(route_vertices, cumulative_lengths, distance_value):
+    if not route_vertices or not cumulative_lengths:
+        return None
+    if distance_value <= 0.0:
+        return tuple(route_vertices[0])
+    if distance_value >= cumulative_lengths[-1]:
+        return tuple(route_vertices[-1])
+
+    for index in range(1, len(cumulative_lengths)):
+        if distance_value > cumulative_lengths[index]:
+            continue
+        segment_start = Vector(route_vertices[index - 1])
+        segment_end = Vector(route_vertices[index])
+        start_length = cumulative_lengths[index - 1]
+        end_length = cumulative_lengths[index]
+        if end_length <= start_length:
+            return tuple(route_vertices[index])
+        factor = (distance_value - start_length) / (end_length - start_length)
+        point = segment_start.lerp(segment_end, factor)
+        return (float(point.x), float(point.y), float(point.z))
+
+    return tuple(route_vertices[-1])
+
+
+def _find_stopline_distances_for_route(route_vertices, source_vertices, source_edges, stop_offset=8.0):
+    if len(route_vertices) < 2 or not source_vertices or not source_edges:
+        return []
+
+    graph = nx.Graph()
+    for index, coord in enumerate(source_vertices):
+        graph.add_node(index, co=tuple(coord))
+    for start, end in source_edges:
+        if start != end:
+            graph.add_edge(start, end)
+
+    intersection_points = []
+    for node, degree in graph.degree():
+        if degree >= 3:
+            intersection_points.append(Vector(graph.nodes[node]["co"]))
+
+    if not intersection_points:
+        return []
+
+    route_vectors = [Vector(co) for co in route_vertices]
+    route_lengths = _compute_route_cumulative_lengths(route_vertices)
+    stopline_distances = []
+
+    for intersection in intersection_points:
+        best_segment = None
+        best_distance = None
+
+        for segment_index in range(1, len(route_vectors)):
+            start = route_vectors[segment_index - 1]
+            end = route_vectors[segment_index]
+            segment = end - start
+            segment_length = segment.length
+            if segment_length <= 1e-6:
+                continue
+
+            t = max(0.0, min(1.0, (intersection - start).dot(segment) / (segment_length * segment_length)))
+            projected = start + segment * t
+            distance = (intersection - projected).length
+            if best_distance is None or distance < best_distance:
+                best_distance = distance
+                best_segment = (segment_index, t)
+
+        if best_segment is None or best_distance is None or best_distance > 6.0:
+            continue
+
+        segment_index, t = best_segment
+        segment_start_length = route_lengths[segment_index - 1]
+        segment_length = (route_vectors[segment_index] - route_vectors[segment_index - 1]).length
+        intersection_distance = segment_start_length + segment_length * t
+        stopline_distance = max(0.0, intersection_distance - stop_offset)
+        stopline_distances.append(stopline_distance)
+
+    stopline_distances = sorted(stopline_distances)
+    deduped = []
+    for distance in stopline_distances:
+        if not deduped or abs(distance - deduped[-1]) > 4.0:
+            deduped.append(distance)
+    return deduped
+
+
+def _build_or_update_stopline_distance_object(name, stopline_distances, collection_name="car_mesh"):
+    stop_obj = bpy.data.objects.get(name)
+    if stop_obj is None:
+        mesh = bpy.data.meshes.new(name)
+        stop_obj = bpy.data.objects.new(name, mesh)
+    else:
+        mesh = stop_obj.data
+        if mesh is None:
+            mesh = bpy.data.meshes.new(name)
+            stop_obj.data = mesh
+        else:
+            mesh.clear_geometry()
+
+    target_collection = bpy.data.collections.get(collection_name)
+    if target_collection is None:
+        target_collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(target_collection)
+
+    for coll in list(stop_obj.users_collection):
+        coll.objects.unlink(stop_obj)
+    if stop_obj.name not in target_collection.objects:
+        target_collection.objects.link(stop_obj)
+
+    bm = bmesh.new()
+    for distance_value in stopline_distances:
+        bm.verts.new((float(distance_value), 0.0, 0.0))
+    bm.verts.ensure_lookup_table()
+    bm.to_mesh(stop_obj.data)
+    bm.free()
+    stop_obj.data.update()
+
+    stop_obj.location = (0.0, 0.0, 0.0)
+    stop_obj.rotation_euler = (0.0, 0.0, 0.0)
+    stop_obj.scale = (1.0, 1.0, 1.0)
+    stop_obj.display_type = 'WIRE'
+    stop_obj.hide_select = True
+    stop_obj.hide_render = True
+    stop_obj.hide_viewport = True
+    return stop_obj
+
+
+def _build_or_update_stopline_point_object(name, route_vertices, stopline_distances, collection_name="car_mesh"):
+    stop_positions = []
+    cumulative_lengths = _compute_route_cumulative_lengths(route_vertices)
+    for distance_value in stopline_distances:
+        point = _sample_route_position_at_distance(route_vertices, cumulative_lengths, float(distance_value))
+        if point is not None:
+            stop_positions.append(point)
+
+    stop_obj = bpy.data.objects.get(name)
+    if stop_obj is None:
+        mesh = bpy.data.meshes.new(name)
+        stop_obj = bpy.data.objects.new(name, mesh)
+    else:
+        mesh = stop_obj.data
+        if mesh is None:
+            mesh = bpy.data.meshes.new(name)
+            stop_obj.data = mesh
+        else:
+            mesh.clear_geometry()
+
+    target_collection = bpy.data.collections.get(collection_name)
+    if target_collection is None:
+        target_collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(target_collection)
+
+    for coll in list(stop_obj.users_collection):
+        coll.objects.unlink(stop_obj)
+    if stop_obj.name not in target_collection.objects:
+        target_collection.objects.link(stop_obj)
+
+    bm = bmesh.new()
+    for point in stop_positions:
+        bm.verts.new(point)
+    bm.verts.ensure_lookup_table()
+    bm.to_mesh(stop_obj.data)
+    bm.free()
+    stop_obj.data.update()
+
+    stop_obj.location = (0.0, 0.0, 0.0)
+    stop_obj.rotation_euler = (0.0, 0.0, 0.0)
+    stop_obj.scale = (1.0, 1.0, 1.0)
+    stop_obj.display_type = 'WIRE'
+    stop_obj.hide_select = True
+    stop_obj.hide_render = True
+    stop_obj.hide_viewport = True
+    return stop_obj
+
+
+def _rebuild_and_bind_traffic_path(traffic_obj=None):
+    if traffic_obj is None:
+        traffic_obj = _find_latest_traffic_object()
+    if traffic_obj is None:
+        raise RuntimeError("Traffic object not found")
+
+    path_source_obj = _find_city_road_graph_source_object()
+    if path_source_obj is None:
+        raise RuntimeError("City road graph source not found")
+
+    vertices, edges = _extract_path_graph_from_object(path_source_obj)
+    if not vertices or not edges:
+        raise RuntimeError("No valid road edges extracted from city base")
+
+    _build_or_update_path_object("path_source", vertices, edges)
+
+    # The traffic node group assigns cars per spline. If we bind the raw road
+    # graph directly, each disconnected edge/branch becomes a short spline and
+    # vehicles only travel a tiny segment. Build one stable main road route for
+    # the actual traffic path, while keeping path_source as the debug road graph.
+    route_vertices, route_edges = _build_main_road_route_from_graph(vertices, edges)
+    if not route_vertices or not route_edges:
+        route_vertices, route_edges = _build_cyclic_route_from_graph(vertices, edges)
+    if route_vertices and route_edges:
+        path_obj = _build_or_update_path_object("traffic_path_from_road", route_vertices, route_edges)
+        bound_vertices = len(route_vertices)
+        bound_edges = len(route_edges)
+        stopline_distances = _find_stopline_distances_for_route(route_vertices, vertices, edges)
+    else:
+        path_obj = _build_or_update_path_object("traffic_path_from_road", vertices, edges)
+        bound_vertices = len(vertices)
+        bound_edges = len(edges)
+        stopline_distances = []
+
+    path_obj["scgs_stopline_distances"] = list(stopline_distances)
+    path_obj["scgs_route_length"] = float(_compute_route_cumulative_lengths(route_vertices)[-1]) if route_vertices else 0.0
+    _build_or_update_stopline_distance_object("traffic_stopline_distances", stopline_distances)
+    if route_vertices:
+        _build_or_update_stopline_point_object("traffic_stopline_points", route_vertices, stopline_distances)
+    _bind_path_object_to_traffic(path_obj, traffic_obj)
+    return path_obj, bound_vertices, bound_edges
+
+
+def _object_world_min_z(obj):
+    if obj is None or not getattr(obj, "bound_box", None):
+        return None
+    corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    if not corners:
+        return None
+    return min(corner.z for corner in corners)
+
+
+def _show_object(obj):
+    if obj is None:
+        return
+    obj.hide_viewport = False
+    obj.hide_render = False
+    try:
+        obj.hide_set(False)
+    except RuntimeError:
+        pass
+
+
+def _hide_object(obj):
+    if obj is None:
+        return
+    obj.hide_viewport = True
+    obj.hide_render = True
+    try:
+        obj.hide_set(True)
+    except RuntimeError:
+        pass
+
+
+def _remove_named_collections(base_name):
+    collections = [coll for coll in bpy.data.collections if _name_version(coll.name, base_name) >= 0]
+    for coll in sorted(collections, key=lambda item: _name_version(item.name, base_name), reverse=True):
+        bpy.data.collections.remove(coll, do_unlink=True)
+
+
+def _append_traffic_assets():
+    car_file_path = os.path.join(os.path.dirname(__file__), 'assets', 'car.blend')
+    vehicle_collection_name = "杞﹁締"
+
+    _remove_named_collections("car_mesh")
+
+    traffic_obj = _find_latest_traffic_object()
+    base_obj = _pick_latest_named(bpy.data.objects, "base")
+    vehicle_collection = _pick_latest_named(bpy.data.collections, vehicle_collection_name)
+
+    if traffic_obj is None or base_obj is None or vehicle_collection is None:
+        with bpy.data.libraries.load(car_file_path, link=False) as (data_from, data_to):
+            objects_to_load = []
+            if traffic_obj is None and "traffic" in data_from.objects:
+                objects_to_load.append("traffic")
+            if base_obj is None and "base" in data_from.objects:
+                objects_to_load.append("base")
+            collections_to_load = []
+            if vehicle_collection is None and vehicle_collection_name in data_from.collections:
+                collections_to_load.append(vehicle_collection_name)
+            data_to.objects = objects_to_load
+            data_to.collections = collections_to_load
+
+        traffic_obj = _find_latest_traffic_object()
+        base_obj = _pick_latest_named(bpy.data.objects, "base")
+        vehicle_collection = _pick_latest_named(bpy.data.collections, vehicle_collection_name)
+
+    _show_object(traffic_obj)
+    _show_object(base_obj)
+
+    if vehicle_collection is not None:
+        vehicle_collection.hide_viewport = True
+        for obj in vehicle_collection.all_objects:
+            _hide_object(obj)
+
+    traffic_collection = bpy.data.collections.new("car_mesh")
+    bpy.context.scene.collection.children.link(traffic_collection)
+
+    if traffic_obj is not None:
+        for coll in list(traffic_obj.users_collection):
+            coll.objects.unlink(traffic_obj)
+        traffic_collection.objects.link(traffic_obj)
+
+    if base_obj is not None:
+        for coll in list(base_obj.users_collection):
+            coll.objects.unlink(base_obj)
+        traffic_collection.objects.link(base_obj)
+
+    if vehicle_collection is not None:
+        for parent_collection in list(bpy.data.collections):
+            if vehicle_collection.name in parent_collection.children:
+                parent_collection.children.unlink(vehicle_collection)
+        traffic_collection.children.link(vehicle_collection)
+
+    return traffic_obj
+TRAFFIC_LIGHT_TIMER_SECONDS = 10.0
+TRAFFIC_LIGHT_POLL_SECONDS = 5.0
+_traffic_light_runtime = {
+    'current_state': 'red',
+    'traffic_should_stop': True,
+    'frame_source_node': None,
+    'offset_frame': 0.0,
+    'frozen_frame': None,
+    'last_scene_frame': None,
+}
+
+
+def scgs_find_principled_or_emission_nodes(material):
+    if material is None or not material.use_nodes or material.node_tree is None:
+        return []
+    return [node for node in material.node_tree.nodes if node.type in {'BSDF_PRINCIPLED', 'EMISSION'}]
+
+
+def scgs_set_material_signal_color(material, rgba, emission_strength):
+    if material is None:
+        return
+    material.diffuse_color = rgba
+    for node in scgs_find_principled_or_emission_nodes(material):
+        if 'Base Color' in node.inputs:
+            node.inputs['Base Color'].default_value = rgba
+        if 'Emission Color' in node.inputs:
+            node.inputs['Emission Color'].default_value = rgba
+        if 'Color' in node.inputs and node.type == 'EMISSION':
+            node.inputs['Color'].default_value = rgba
+        if 'Emission Strength' in node.inputs:
+            node.inputs['Emission Strength'].default_value = emission_strength
+        if 'Strength' in node.inputs and node.type == 'EMISSION':
+            node.inputs['Strength'].default_value = emission_strength
+
+
+def scgs_disconnect_signal_color_inputs(material):
+    if material is None or not material.use_nodes or material.node_tree is None:
+        return
+    node_tree = material.node_tree
+    sockets_to_clear = {'Base Color', 'Emission Color', 'Color'}
+    links_to_remove = []
+    for link in node_tree.links:
+        if link.to_socket.name in sockets_to_clear:
+            links_to_remove.append(link)
+    for link in links_to_remove:
+        node_tree.links.remove(link)
+
+
+def scgs_set_view3d_solid_color_mode():
+    screen = getattr(bpy.context, 'screen', None)
+    if screen is None:
+        return
+    for area in screen.areas:
+        if area.type != 'VIEW_3D':
+            continue
+        for space in area.spaces:
+            if space.type != 'VIEW_3D':
+                continue
+            shading = space.shading
+            if shading.type == 'SOLID' and shading.color_type != 'MATERIAL':
+                shading.color_type = 'MATERIAL'
+
+
+def scgs_set_object_signal_color(obj, rgba):
+    if obj is None:
+        return
+    obj.color = rgba
+
+
+def scgs_refresh_traffic_light_view():
+    road_obj = bpy.data.objects.get('ICity Road')
+    if road_obj is not None:
+        road_obj.update_tag(refresh={'OBJECT', 'DATA'})
+
+    traffic_sources = scgs_find_traffic_light_objects()
+    for obj in traffic_sources:
+        obj.update_tag(refresh={'OBJECT', 'DATA'})
+
+    view_layer = getattr(bpy.context, 'view_layer', None)
+    if view_layer is not None:
+        try:
+            view_layer.update()
+        except Exception:
+            pass
+
+
+def scgs_ensure_traffic_frame_control(traffic_obj=None):
+    node_group = _find_traffic_node_group(traffic_obj)
+    if node_group is None:
+        return None, None
+
+    math_node = node_group.nodes.get("Math.036")
+    if math_node is None or len(math_node.inputs) < 1:
+        return None, None
+
+    frame_input = math_node.inputs[0]
+    value_node = node_group.nodes.get("SCGS Traffic Frame")
+
+    if value_node is None:
+        value_node = node_group.nodes.new("ShaderNodeValue")
+        value_node.name = "SCGS Traffic Frame"
+        value_node.label = "SCGS Traffic Frame"
+        value_node.outputs[0].default_value = float(bpy.context.scene.frame_current)
+
+    for link in list(frame_input.links):
+        node_group.links.remove(link)
+    node_group.links.new(value_node.outputs[0], frame_input)
+    _traffic_light_runtime['frame_source_node'] = value_node.name
+    return node_group, value_node
+
+
+def scgs_update_traffic_frame_driver(scene=None, traffic_obj=None):
+    if scene is None:
+        scene = bpy.context.scene
+    if scene is None:
+        return False
+
+    node_group, value_node = scgs_ensure_traffic_frame_control(traffic_obj)
+    if node_group is None or value_node is None:
+        return False
+
+    scene_frame = float(scene.frame_current)
+
+    if _traffic_light_runtime.get('last_scene_frame') is None:
+        _traffic_light_runtime['last_scene_frame'] = scene_frame
+
+    if _traffic_light_runtime.get('traffic_should_stop', True):
+        if _traffic_light_runtime.get('frozen_frame') is None:
+            _traffic_light_runtime['frozen_frame'] = scene_frame - float(_traffic_light_runtime.get('offset_frame', 0.0))
+        traffic_frame = float(_traffic_light_runtime['frozen_frame'])
+    else:
+        frozen_frame = _traffic_light_runtime.get('frozen_frame')
+        if frozen_frame is not None:
+            _traffic_light_runtime['offset_frame'] = scene_frame - float(frozen_frame)
+            _traffic_light_runtime['frozen_frame'] = None
+        traffic_frame = scene_frame - float(_traffic_light_runtime.get('offset_frame', 0.0))
+
+    value_node.outputs[0].default_value = traffic_frame
+    _traffic_light_runtime['last_scene_frame'] = scene_frame
+    return True
+
+
+def scgs_ensure_signal_material(material_name, template_name, rgba, emission_strength):
+    material = bpy.data.materials.get(material_name)
+    if material is None:
+        template = bpy.data.materials.get(template_name)
+        material = template.copy() if template else bpy.data.materials.new(name=material_name)
+        material.name = material_name
+    scgs_disconnect_signal_color_inputs(material)
+    scgs_set_material_signal_color(material, rgba, emission_strength)
+    return material
+
+
+def scgs_ensure_traffic_signal_materials():
+    return {
+        'legacy_red_on': scgs_ensure_signal_material('SCGS Traffic Legacy Red On', 'Red on', (1.0, 0.08, 0.08, 1.0), 12.0),
+        'legacy_red_off': scgs_ensure_signal_material('SCGS Traffic Legacy Red Off', 'Red off', (0.03, 0.005, 0.005, 1.0), 0.0),
+        'legacy_yellow_off': scgs_ensure_signal_material('SCGS Traffic Legacy Yellow Off', '*25', (0.03, 0.02, 0.005, 1.0), 0.0),
+        'legacy_green_on': scgs_ensure_signal_material('SCGS Traffic Legacy Green On', '*26', (0.05, 1.0, 0.15, 1.0), 12.0),
+        'legacy_green_off': scgs_ensure_signal_material('SCGS Traffic Legacy Green Off', '*26', (0.005, 0.03, 0.01, 1.0), 0.0),
+        'red_on': scgs_ensure_signal_material('SCGS Traffic Native Red On', 'Lime._semaforo luz ambar.003', (1.0, 0.1, 0.1, 1.0), 12.0),
+        'red_off': scgs_ensure_signal_material('SCGS Traffic Native Red Off', 'Lime._semaforo luz ambar.003', (0.03, 0.005, 0.005, 1.0), 0.0),
+        'yellow_on': scgs_ensure_signal_material('SCGS Traffic Native Yellow On', 'Lime._semaforo luz ambar.005', (1.0, 0.7, 0.15, 1.0), 8.0),
+        'yellow_off': scgs_ensure_signal_material('SCGS Traffic Native Yellow Off', 'Lime._semaforo luz ambar.005', (0.03, 0.02, 0.005, 1.0), 0.0),
+        'green_on': scgs_ensure_signal_material('SCGS Traffic Native Green On', 'Lime._semaforo luz ambar.004', (0.05, 1.0, 0.15, 1.0), 12.0),
+        'green_off': scgs_ensure_signal_material('SCGS Traffic Native Green Off', 'Lime._semaforo luz ambar.004', (0.005, 0.03, 0.01, 1.0), 0.0),
+    }
+
+
+def scgs_get_traffic_light_slot_indices(obj):
+    slot_map = {'red': [], 'green': [], 'yellow': [], 'mode': None}
+    legacy_object = 'traffic light_traffic light_icity_default' in obj.name.lower()
+    if legacy_object:
+        slot_map['mode'] = 'legacy'
+        slot_count = len(obj.data.materials)
+        if slot_count > 4:
+            slot_map['red'] = [3, 4]
+        if slot_count > 6:
+            slot_map['green'] = [6]
+        if slot_count > 7:
+            slot_map['yellow'] = [7]
+        return slot_map
+
+    for index, material in enumerate(obj.data.materials):
+        if material is None:
+            continue
+        name = material.name.lower()
+        if ('semaforo' in name and '.003' in name) or ('native red' in name):
+            slot_map['mode'] = slot_map['mode'] or 'native'
+            slot_map['red'].append(index)
+        elif ('semaforo' in name and '.004' in name) or ('native green' in name):
+            slot_map['mode'] = slot_map['mode'] or 'native'
+            slot_map['green'].append(index)
+        elif ('semaforo' in name and '.005' in name) or ('native yellow' in name):
+            slot_map['mode'] = slot_map['mode'] or 'native'
+            slot_map['yellow'].append(index)
+        elif (
+            name.startswith('red off')
+            or name.startswith('red on')
+            or 'legacy red' in name
+            or 'scgs traffic red' in name
+        ):
+            slot_map['mode'] = slot_map['mode'] or 'legacy'
+            slot_map['red'].append(index)
+        elif (
+            name == '*26'
+            or name.startswith('*26.')
+            or 'legacy green' in name
+            or 'scgs traffic green' in name
+        ):
+            slot_map['mode'] = slot_map['mode'] or 'legacy'
+            slot_map['green'].append(index)
+        elif (
+            name == '*25'
+            or name.startswith('*25.')
+            or 'legacy yellow' in name
+            or 'scgs traffic yellow' in name
+        ):
+            slot_map['mode'] = slot_map['mode'] or 'legacy'
+            slot_map['yellow'].append(index)
+    return slot_map
+
+
+def scgs_get_native_traffic_light_sources():
+    sources = []
+    road_obj = bpy.data.objects.get('ICity Road')
+    if road_obj is not None:
+        modifier = road_obj.modifiers.get('GeometryNodes')
+        if modifier and modifier.node_group:
+            road_group = modifier.node_group
+            node = road_group.nodes.get('Object Info.001')
+            if node is not None:
+                obj = node.inputs[0].default_value
+                if obj is not None and obj.type == 'MESH':
+                    sources.append(obj)
+    return sources
+
+
+def scgs_find_traffic_light_objects():
+    objects = []
+    seen = set()
+    for obj in scgs_get_native_traffic_light_sources():
+        if obj is None or obj.name in seen:
+            continue
+        if obj.type != 'MESH' or not getattr(obj.data, 'materials', None):
+            continue
+        objects.append(obj)
+        seen.add(obj.name)
+    return objects
+
+
+def scgs_get_traffic_light_debug_lines():
+    lines = []
+    road_obj = bpy.data.objects.get('ICity Road')
+    if road_obj is None:
+        return ['No object named ICity Road was found.']
+    modifier = road_obj.modifiers.get('GeometryNodes')
+    if modifier is None or modifier.node_group is None:
+        return ['ICity Road does not have a valid GeometryNodes modifier.']
+    road_group = modifier.node_group
+    node = road_group.nodes.get('Object Info.001')
+    if node is None:
+        lines.append('Road 2 source node: Object Info.001 not found')
+    else:
+        source_obj = node.inputs[0].default_value
+        lines.append(f"Road 2 source object: {source_obj.name if source_obj else 'None'}")
+        if source_obj is not None and getattr(source_obj.data, 'materials', None):
+            slot_map = scgs_get_traffic_light_slot_indices(source_obj)
+            lines.append(f"Detected mode: {slot_map.get('mode') or 'unknown'}")
+            lines.append("Source materials: " + ", ".join(mat.name if mat else 'None' for mat in source_obj.data.materials))
+    traffic_lights = scgs_find_traffic_light_objects()
+    if not traffic_lights:
+        lines.append('Matched traffic light objects: none')
+        return lines
+    lines.append("Matched traffic light objects: " + ", ".join(obj.name for obj in traffic_lights))
+    for obj in traffic_lights:
+        slot_map = scgs_get_traffic_light_slot_indices(obj)
+        lines.append(
+            f"{obj.name}: mode={slot_map.get('mode') or 'unknown'}, "
+            f"red={slot_map.get('red', [])}, yellow={slot_map.get('yellow', [])}, green={slot_map.get('green', [])}"
+        )
+        lines.append(f"{obj.name} materials: " + ", ".join(mat.name if mat else 'None' for mat in obj.data.materials))
+    return lines
+
+
+def scgs_apply_traffic_light_state(state):
+    traffic_lights = scgs_find_traffic_light_objects()
+    resolved_state = state if state in {'red', 'green'} else 'red'
+    _traffic_light_runtime['current_state'] = resolved_state
+    _traffic_light_runtime['traffic_should_stop'] = (resolved_state == 'red')
+    traffic_updated = scgs_update_traffic_frame_driver()
+    if not traffic_lights:
+        return traffic_updated
+    scgs_set_view3d_solid_color_mode()
+    materials = scgs_ensure_traffic_signal_materials()
+    is_red = (resolved_state == 'red')
+    for obj in traffic_lights:
+        slot_map = scgs_get_traffic_light_slot_indices(obj)
+        use_legacy = (slot_map.get('mode') == 'legacy')
+        legacy_object = 'traffic light_traffic light_icity_default' in obj.name.lower()
+        red_on = materials['legacy_red_on'] if use_legacy else materials['red_on']
+        red_off = materials['legacy_red_off'] if use_legacy else materials['red_off']
+        green_on = materials['legacy_green_on'] if use_legacy else materials['green_on']
+        green_off = materials['legacy_green_off'] if use_legacy else materials['green_off']
+        yellow_off = materials['legacy_yellow_off'] if use_legacy else materials['yellow_off']
+        if use_legacy and legacy_object:
+            for slot_index in slot_map.get('red', []):
+                obj.data.materials[slot_index] = red_on if is_red else green_on
+            for slot_index in slot_map.get('green', []):
+                obj.data.materials[slot_index] = green_off if is_red else green_on
+        else:
+            for slot_index in slot_map.get('red', []):
+                obj.data.materials[slot_index] = red_on if is_red else red_off
+            for slot_index in slot_map.get('green', []):
+                obj.data.materials[slot_index] = green_off if is_red else green_on
+        for slot_index in slot_map.get('yellow', []):
+            obj.data.materials[slot_index] = yellow_off
+        scgs_set_object_signal_color(obj, (1.0, 0.08, 0.08, 1.0) if is_red else (0.05, 1.0, 0.15, 1.0))
+        obj.data.update()
+        obj.update_tag(refresh={'OBJECT', 'DATA'})
+    scgs_refresh_traffic_light_view()
+    return True
+
+
+def scgs_traffic_light_timer():
+    try:
+        current_state = _traffic_light_runtime.get('current_state', 'red')
+        if current_state not in {'red', 'green'}:
+            current_state = 'red'
+        next_state = 'green' if current_state == 'red' else 'red'
+        if not scgs_apply_traffic_light_state(next_state):
+            return TRAFFIC_LIGHT_POLL_SECONDS
+        _traffic_light_runtime['current_state'] = next_state
+        return TRAFFIC_LIGHT_TIMER_SECONDS
+    except Exception as exc:
+        print(f"[traffic_light_timer] {exc}")
+        return TRAFFIC_LIGHT_POLL_SECONDS
+
+
+def scgs_register_traffic_light_timer():
+    _traffic_light_runtime['current_state'] = 'red'
+    _traffic_light_runtime['traffic_should_stop'] = True
+    _traffic_light_runtime['offset_frame'] = 0.0
+    _traffic_light_runtime['frozen_frame'] = None
+    _traffic_light_runtime['last_scene_frame'] = None
+    try:
+        scgs_apply_traffic_light_state('red')
+    except Exception as exc:
+        print(f"[traffic_light_register] {exc}")
+    if not bpy.app.timers.is_registered(scgs_traffic_light_timer):
+        bpy.app.timers.register(
+            scgs_traffic_light_timer,
+            first_interval=TRAFFIC_LIGHT_TIMER_SECONDS,
+            persistent=True,
+        )
+
+
+def scgs_unregister_traffic_light_timer():
+    if bpy.app.timers.is_registered(scgs_traffic_light_timer):
+        bpy.app.timers.unregister(scgs_traffic_light_timer)
+
+
+@persistent
+def scgs_reset_traffic_light_cycle(_dummy):
+    _traffic_light_runtime['current_state'] = 'red'
+    _traffic_light_runtime['traffic_should_stop'] = True
+    _traffic_light_runtime['offset_frame'] = 0.0
+    _traffic_light_runtime['frozen_frame'] = None
+    _traffic_light_runtime['last_scene_frame'] = None
+
+
+@persistent
+def scgs_update_traffic_motion_frame(_scene, _depsgraph=None):
+    try:
+        scgs_update_traffic_frame_driver()
+    except Exception:
+        pass
+class SNA_OT_Raise_CarMesh_Height(bpy.types.Operator):
+    bl_idname = "sna.raise_carmesh_height"
+    bl_label = "Raise CarMesh Height"
+    bl_description = "Raise the traffic car mesh slightly without rebinding"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        car_mesh_obj = _find_latest_carmesh_object()
+        if car_mesh_obj is not None:
+            old_z = float(car_mesh_obj.location.z)
+            new_z = old_z + 0.01
+            car_mesh_obj.location.z = new_z
+            self.report({'INFO'}, f"car_mesh Z: {old_z:.3f} -> {new_z:.3f}")
+            return {'FINISHED'}
+
+        traffic_obj = _find_latest_traffic_object()
+        if traffic_obj is None:
+            self.report({'ERROR'}, "car_mesh or traffic object not found")
+            return {'CANCELLED'}
+
+        current_offset_z = _get_traffic_offset_z(traffic_obj)
+        if current_offset_z is None:
+            self.report({'ERROR'}, "traffic height offset node not found")
+            return {'CANCELLED'}
+
+        new_offset_z = current_offset_z + 0.01
+        settle_traffic_nodes(offset_z=new_offset_z, traffic_obj=traffic_obj)
+        self.report({'INFO'}, f"CarMesh height: {current_offset_z:.3f} -> {new_offset_z:.3f}")
+        return {'FINISHED'}
+
+
+class SNA_OT_Rebuild_Traffic_Path(bpy.types.Operator):
+    bl_idname = "sna.rebuild_traffic_path"
+    bl_label = "Rebuild Traffic Path"
+    bl_description = "Re-extract the city road graph and rebind it to traffic"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        try:
+            traffic_obj = _find_latest_traffic_object()
+            path_obj, vertex_count, edge_count = _rebuild_and_bind_traffic_path(traffic_obj)
+        except Exception as exc:
+            self.report({'ERROR'}, f"Rebuild traffic path failed: {exc}")
+            return {'CANCELLED'}
+
+        self.report(
+            {'INFO'},
+            f"Traffic path rebound: {path_obj.name} ({vertex_count} verts, {edge_count} edges)"
+        )
+        return {'FINISHED'}
+
+
+class SNA_OT_Show_Car_Path(bpy.types.Operator):
+    bl_idname = "sna.show_car_path"
+    bl_label = "Show Car Path"
+    bl_description = "Show generated traffic path objects in the viewport"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        path_names = ("path_source", "traffic_path_from_road")
+        found_objects = []
+
+        for name in path_names:
+            obj = bpy.data.objects.get(name)
+            if obj is None:
+                continue
+            obj.hide_viewport = False
+            obj.hide_render = False
+            obj.display_type = 'WIRE'
+            try:
+                obj.hide_set(False)
+            except RuntimeError:
+                pass
+            found_objects.append(obj)
+
+        if not found_objects:
+            self.report({'ERROR'}, "No traffic path object found. Please rebind traffic first.")
+            return {'CANCELLED'}
+
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in found_objects:
+                obj.select_set(True)
+            context.view_layer.objects.active = found_objects[0]
+        except RuntimeError:
+            pass
+
+        shown_names = ", ".join(obj.name for obj in found_objects)
+        self.report({'INFO'}, f"Shown traffic path: {shown_names}")
+        return {'FINISHED'}
+
+
+class SNA_OT_Check_Traffic_Light_Source_7D3F1(bpy.types.Operator):
+    bl_idname = "sna.check_traffic_light_source_7d3f1"
+    bl_label = "Check Traffic Light Source"
+    bl_description = "Show which traffic light object and materials ICity Road is currently using"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        lines = scgs_get_traffic_light_debug_lines()
+
+        def draw_popup(self_popup, _context):
+            for line in lines:
+                self_popup.layout.label(text=line[:180])
+
+        context.window_manager.popup_menu(draw_popup, title="Traffic Light Source", icon='INFO')
+        for line in lines:
+            print(f"[SCGS Traffic Debug] {line}")
+        return {'FINISHED'}
+
+
+class SNA_OT_Set_Traffic_Light_Red_Now(bpy.types.Operator):
+    bl_idname = "sna.set_traffic_light_red_now"
+    bl_label = "Set Traffic Light Red Now"
+    bl_description = "Force ICity Road traffic lights to red immediately"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        _traffic_light_runtime['current_state'] = 'red'
+        if not scgs_apply_traffic_light_state('red'):
+            self.report({'ERROR'}, "No ICity Road traffic light source found")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "ICity Road traffic lights forced to red")
+        return {'FINISHED'}
+
+
+class SNA_OT_Start_Traffic_Light_Cycle(bpy.types.Operator):
+    bl_idname = "sna.start_traffic_light_cycle"
+    bl_label = "Start Traffic Light Cycle"
+    bl_description = "Start the 10s red / 10s green cycle for ICity Road traffic lights"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scgs_unregister_traffic_light_timer()
+        _traffic_light_runtime['current_state'] = 'red'
+        if not scgs_apply_traffic_light_state('red'):
+            self.report({'ERROR'}, "No ICity Road traffic light source found")
+            return {'CANCELLED'}
+        scgs_register_traffic_light_timer()
+        self.report({'INFO'}, "Traffic light cycle started: red 10s / green 10s")
+        return {'FINISHED'}
+
+
+class SNA_PT_ICITY_EDITOR_6D34D(bpy.types.Panel):
+    bl_label = 'SCGS editor'
+    bl_idname = 'SNA_PT_ICITY_EDITOR_6D34D'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+
+
 
 
 class MainPathBuildings:
@@ -1531,6 +3032,550 @@ class SNA_OT_Process_AI_Instruction(bpy.types.Operator):
 
 
 
+        # 添加模板选择下拉框
+        row = layout.row()
+        row.prop(context.scene, "sna_template_selection_enum", text="模板选择")
+        row.operator("sna.apply_template", text="应用模板")
+
+        # 添加大模型指令输入框
+        row = layout.row()
+        row.prop(context.scene, "sna_ai_instruction", text="AI指令")
+        row.operator("sna.process_ai_instruction", text="执行")
+
+# 模板应用操作符
+class SNA_OT_Apply_Template(bpy.types.Operator):
+    bl_idname = "sna.apply_template"
+    bl_label = "应用模板"
+    bl_description = "根据选择的模板自动配置树木、道路、座椅类型和天气效果"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        # 从下拉框（EnumProperty）获取模板ID
+        template_id = context.scene.sna_template_selection_enum
+
+        if not template_id:
+            self.report({'ERROR'}, "请选择一个模板")
+            return {"CANCELLED"}
+
+        template_config = SceneTemplate.get_template(template_id)
+        if template_config is None:
+            available = SceneTemplate.list_templates()
+            names = "\n".join([f"  {t['id']}: {t['name']}" for t in available])
+            self.report({'ERROR'}, f"未找到模板: {template_id}\n可用模板:\n{names}")
+            return {"CANCELLED"}
+
+        try:
+            self._apply_config(context, template_config)
+            # 同时应用天气配置
+            weather_params = SceneTemplate.get_weather_params(template_id)
+            if weather_params:
+                self._apply_weather_config(context, weather_params)
+            template_name = template_config.get("name", "模板")
+            self.report({'INFO'}, f"成功应用模板: {template_name}")
+            return {"FINISHED"}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.report({'ERROR'}, f"应用模板失败: {str(e)}")
+            return {"CANCELLED"}
+
+    def _apply_config(self, context, config):
+        """应用模板配置到场景（树/道路/座椅）"""
+        if "tree" in config:
+            self._apply_tree_config(context, config["tree"])
+        if "road" in config:
+            self._apply_road_config(context, config["road"])
+        if "bench" in config:
+            self._apply_bench_config(context, config["bench"])
+
+    def _apply_tree_config(self, context, tree_type):
+        """应用树木类型配置 - 直接设置节点组，绕过 road_apply_5c3ab 的 poll 限制"""
+        context.scene.sna_street_asset_type = 'Tree'
+        tree_asset = SceneTemplate.get_asset_name("tree", tree_type)
+        if tree_asset:
+            try:
+                context.scene.sna_street_asset_browser = tree_asset
+            except TypeError:
+                print(f"树木资产 '{tree_asset}' 不可用（场景中可能不存在）")
+        # 直接设置节点组值（绕过 poll 限制的 road_apply_5c3ab）
+        try:
+            if 'Road 2' in bpy.data.node_groups and tree_asset in bpy.data.objects:
+                bpy.data.node_groups['Road 2'].nodes['Tree'].inputs[4].default_value = bpy.data.objects[tree_asset]
+        except Exception as e:
+            print(f"直接设置树木节点组值时出错: {e}")
+
+    def _apply_road_config(self, context, road_type):
+        """应用道路纹理配置 - 直接设置节点组"""
+        context.scene.sna_street_asset_type = 'Texture'
+        context.scene.sna_road_materials_type_ = 'Road'
+        road_asset = SceneTemplate.get_asset_name("road", road_type)
+        if road_asset:
+            try:
+                context.scene.sna_road_materials_browser = road_asset
+            except TypeError:
+                print(f"道路资产 '{road_asset}' 不可用（场景中可能不存在）")
+        # 直接设置材质到节点组
+        try:
+            if 'Road 2' in bpy.data.node_groups and road_asset in bpy.data.materials:
+                bpy.data.node_groups['Road 2'].nodes['Road'].inputs[2].default_value = bpy.data.materials[road_asset]
+                if 'ICity Road' in bpy.data.objects:
+                    bpy.data.objects['ICity Road'].update_tag(refresh={'DATA'})
+        except Exception as e:
+            print(f"直接设置道路节点组值时出错: {e}")
+
+    def _apply_bench_config(self, context, bench_type):
+        """应用座椅类型配置 - 直接设置节点组"""
+        context.scene.sna_street_asset_type = 'Bench'
+        bench_asset = SceneTemplate.get_asset_name("bench", bench_type)
+        if bench_asset:
+            try:
+                context.scene.sna_street_asset_browser = bench_asset
+            except TypeError:
+                print(f"座椅资产 '{bench_asset}' 不可用（场景中可能不存在）")
+        # 直接设置节点组值
+        try:
+            if 'Road 2' in bpy.data.node_groups and bench_asset in bpy.data.objects:
+                bpy.data.node_groups['Road 2'].nodes['Bench'].inputs[4].default_value = bpy.data.objects[bench_asset]
+        except Exception as e:
+            print(f"直接设置座椅节点组值时出错: {e}")
+
+    # ------------------------------------------------------------
+    # 天气应用
+    # ------------------------------------------------------------
+    def _apply_weather_config(self, context, weather_params):
+        """根据模板的天气参数应用天气效果"""
+        weather = weather_params.get("weather", "sunny")
+        if weather == "snowy":
+            self._apply_snow_weather(context, weather_params)
+        elif weather == "rainy":
+            self._apply_rain_weather(context, weather_params)
+        else:
+            self._apply_sunny_weather(context)
+
+    def _del_weather(self, collection_name):
+        """隐藏天气集合中的所有物体"""
+        if collection_name in bpy.data.collections:
+            collection = bpy.data.collections[collection_name]
+            for obj in collection.objects:
+                obj.hide_set(True)
+
+    def _show_weather_collection(self, collection_name):
+        """显示天气集合中的所有物体"""
+        if collection_name in bpy.data.collections:
+            collection = bpy.data.collections[collection_name]
+            for obj in collection.objects:
+                obj.hide_set(False)
+                obj.hide_viewport = False
+                obj.hide_render = False
+
+    def _apply_snow_weather(self, context, params):
+        """应用雪天效果"""
+        # 先隐藏雨天效果
+        self._del_weather("Rain Weather Collection")
+
+        if "Snow Weather Collection" in bpy.data.collections:
+            # 已存在雪天集合 -> 直接显示
+            self._show_weather_collection("Snow Weather Collection")
+            # 更新雪景参数
+            try:
+                snow_ground = bpy.data.objects.get("WI Snow Ground")
+                if snow_ground:
+                    snow_ground.location = params.get("snow_ground_loaction", (-50, 0, 6.2779))
+                    snow_ground.dimensions = params.get("snow_ground_dimensions", (250, 150, 6.277))
+                    mod = snow_ground.modifiers.get("WI Snow Ground")
+                    if mod:
+                        mod["Socket_6"] = params.get("density", 0.8)
+                        mod["Socket_7"] = params.get("thickness", 0.5)
+                snow_fall_obj = bpy.data.objects.get("WI Snow Fall")
+                if snow_fall_obj:
+                    snow_fall_obj.location = params.get("snow_loaction", (-50, 0, 50))
+                    snow_fall_obj.scale = params.get("snow_scale", (50, 50, 50))
+            except Exception as e:
+                print(f"更新雪景参数时出错: {e}")
+        else:
+            # 创建新的雪天效果 - 复用 weather.py 的函数
+            try:
+                from SCGS.weather import snow_weather as create_snow_weather
+                collection_mesh = "snow"
+                create_snow_weather(
+                    collection_mesh,
+                    params.get("snow_ground_loaction", (-50, 0, 6.2779)),
+                    params.get("snow_ground_dimensions", (250, 150, 6.277)),
+                    params.get("density", 0.8),
+                    params.get("thickness", 0.5),
+                    params.get("snow_loaction", (-50, 0, 50)),
+                    params.get("snow_scale", (50, 50, 50))
+                )
+            except Exception as e:
+                print(f"创建雪天效果时出错: {e}")
+
+        bpy.context.scene.sna_weather = "snowy"
+
+    def _apply_rain_weather(self, context, params):
+        """应用雨天效果"""
+        # 先隐藏雪天效果
+        self._del_weather("Snow Weather Collection")
+
+        if "Rain Weather Collection" in bpy.data.collections:
+            # 已存在雨天集合 -> 直接显示
+            self._show_weather_collection("Rain Weather Collection")
+        else:
+            # 创建新的雨天效果 - 复用 weather.py 的函数
+            try:
+                from SCGS.weather import rain_weather as create_rain_weather
+                create_rain_weather(
+                    params.get("lighting_socket_2_value", 5.0),
+                    params.get("lighting_socket_3_value", 10.0),
+                    params.get("lighting_socket_4_value", 10.0),
+                    params.get("lighting_loaction", (0, 0, 50)),
+                    params.get("rain_fall_socket_2_value", 3.0),
+                    params.get("rain_fall_socket_3_value", 11.0),
+                    params.get("rain_fall_socket_4_value", 14.0),
+                    params.get("rain_fall_location", (0, 0, 60)),
+                    params.get("rain_fall_scale", (100, 100, 100)),
+                    params.get("clouds_loaction", (0, 0, 80)),
+                    params.get("clouds_scale", (100, 100, 1))
+                )
+            except Exception as e:
+                print(f"创建雨天效果时出错: {e}")
+
+        bpy.context.scene.sna_weather = "rainy"
+
+    def _apply_sunny_weather(self, context):
+        """应用晴天效果 - 隐藏所有天气效果"""
+        self._del_weather("Rain Weather Collection")
+        self._del_weather("Snow Weather Collection")
+        bpy.context.scene.sna_weather = "sunny"
+
+# AI指令处理操作符
+class SNA_OT_Process_AI_Instruction(bpy.types.Operator):
+    bl_idname = "sna.process_ai_instruction"
+    bl_label = "处理AI指令"
+    bl_description = "使用大模型解析并执行自然语言指令"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        instruction = context.scene.sna_ai_instruction.strip()
+        if not instruction:
+            self.report({'ERROR'}, "请输入AI指令")
+            return {"CANCELLED"}
+
+        try:
+            # 尝试使用LLM解析，失败则回退到本地解析
+            config = None
+            try:
+                config = self._parse_with_llm(instruction)
+                if config:
+                    print(f"LLM解析结果: {config}")
+            except Exception as e:
+                print(f"LLM解析失败，使用本地解析: {e}")
+
+            if not config:
+                config = self._parse_locally(instruction)
+                print(f"本地解析结果: {config}")
+
+            if not config:
+                self.report({'ERROR'}, "无法解析指令，请尝试输入如'树木1，道路2，座椅1'的格式")
+                return {"CANCELLED"}
+
+            # 验证配置
+            is_valid, error_msg = ConfigParser.validate_config(config)
+            if not is_valid:
+                self.report({'ERROR'}, f"配置无效: {error_msg}")
+                return {"CANCELLED"}
+
+            # 应用配置
+            self._apply_config(context, config)
+
+            # 构造成功信息
+            applied = []
+            if "tree" in config:
+                applied.append(f"树木={config['tree']}")
+            if "road" in config:
+                applied.append(f"道路={config['road']}")
+            if "bench" in config:
+                applied.append(f"座椅={config['bench']}")
+
+            message = "成功执行指令: " + ", ".join(applied) if applied else "成功处理指令"
+            self.report({'INFO'}, message)
+            return {"FINISHED"}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"处理指令失败: {str(e)}")
+            return {"CANCELLED"}
+
+    def _parse_with_llm(self, instruction):
+        """使用大模型解析指令"""
+        try:
+            from SCGS.dashscope_client import chat_completions_content
+        except ImportError:
+            from dashscope_client import chat_completions_content
+
+        prompt = SceneTemplate.create_prompt_for_parsing().replace(
+            "{INSTRUCTION}", instruction
+        )
+
+        response_str = chat_completions_content(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=1024,
+        )
+
+        return ConfigParser.parse_response(response_str)
+
+    def _parse_locally(self, instruction):
+        """本地解析指令（不使用LLM）"""
+        import re
+        config = {}
+
+        # 检查是否是纯数字（模板ID）
+        if instruction.strip().isdigit():
+            template = SceneTemplate.get_template(instruction.strip())
+            if template:
+                config.update({
+                    "tree": template.get("tree"),
+                    "road": template.get("road"),
+                    "bench": template.get("bench"),
+                    "weather": template.get("weather", "sunny"),
+                })
+                return config
+
+        # 检查是否包含 "模板" 关键词（如 "模板4"、"选择模板4"、"应用模板0"）
+        template_match = re.search(r'模板\s*(\d)', instruction)
+        if template_match:
+            template_id = template_match.group(1)
+            template = SceneTemplate.get_template(template_id)
+            if template:
+                config.update({
+                    "tree": template.get("tree"),
+                    "road": template.get("road"),
+                    "bench": template.get("bench"),
+                    "weather": template.get("weather", "sunny"),
+                })
+                return config
+
+        # 检查是否包含模板名称（如 "现代风格"、"古典风格"）
+        for tid, tpl in SceneTemplate.get_all_templates().items():
+            tpl_name = tpl.get("name", "")
+            if tpl_name and tpl_name in instruction:
+                config.update({
+                    "tree": tpl.get("tree"),
+                    "road": tpl.get("road"),
+                    "bench": tpl.get("bench"),
+                    "weather": tpl.get("weather", "sunny"),
+                })
+                return config
+
+        instruction_lower = instruction.lower()
+
+        # 按关键词提取类型数字
+        tree_patterns = [
+            r'树木[：:=\s]*(\d)', r'tree[：:=\s]*(\d)', r'树[：:=\s]*(\d)',
+        ]
+        for pattern in tree_patterns:
+            match = re.search(pattern, instruction_lower)
+            if match:
+                config["tree"] = match.group(1)
+                break
+
+        road_patterns = [
+            r'道路[：:=\s]*(\d)', r'road[：:=\s]*(\d)', r'路[：:=\s]*(\d)',
+        ]
+        for pattern in road_patterns:
+            match = re.search(pattern, instruction_lower)
+            if match:
+                config["road"] = match.group(1)
+                break
+
+        bench_patterns = [
+            r'座椅[：:=\s]*(\d)', r'bench[：:=\s]*(\d)', r'椅[：:=\s]*(\d)',
+        ]
+        for pattern in bench_patterns:
+            match = re.search(pattern, instruction_lower)
+            if match:
+                config["bench"] = match.group(1)
+                break
+
+        # 如果没有提取到任何参数，尝试按顺序提取数字
+        if not config:
+            numbers = re.findall(r'\d', instruction)
+            if numbers:
+                if len(numbers) >= 1:
+                    config["tree"] = numbers[0]
+                if len(numbers) >= 2:
+                    config["road"] = numbers[1]
+                if len(numbers) >= 3:
+                    config["bench"] = numbers[2]
+
+        return config
+
+    def _apply_config(self, context, config):
+        """应用配置到场景"""
+        if "tree" in config:
+            self._apply_tree_config(context, str(config["tree"]))
+        if "road" in config:
+            self._apply_road_config(context, str(config["road"]))
+        if "bench" in config:
+            self._apply_bench_config(context, str(config["bench"]))
+        # 应用天气配置
+        if "weather" in config:
+            weather_params = {"weather": config["weather"]}
+            if config["weather"] == "snowy":
+                template = SceneTemplate.get_template(config.get("template_id", ""))
+                if template:
+                    weather_params = SceneTemplate.get_weather_params(config["template_id"])
+            elif config["weather"] == "rainy":
+                template = SceneTemplate.get_template(config.get("template_id", ""))
+                if template:
+                    weather_params = SceneTemplate.get_weather_params(config["template_id"])
+            self._apply_weather_config(context, weather_params)
+
+    def _apply_tree_config(self, context, tree_type):
+        """应用树木类型配置"""
+        context.scene.sna_street_asset_type = 'Tree'
+        tree_asset = SceneTemplate.get_asset_name("tree", tree_type)
+        if tree_asset:
+            try:
+                context.scene.sna_street_asset_browser = tree_asset
+            except TypeError:
+                print(f"树木资产 '{tree_asset}' 不可用")
+        try:
+            if 'Road 2' in bpy.data.node_groups and tree_asset in bpy.data.objects:
+                bpy.data.node_groups['Road 2'].nodes['Tree'].inputs[4].default_value = bpy.data.objects[tree_asset]
+        except Exception as e:
+            print(f"应用树木类型 {tree_type} 时出错: {e}")
+
+    def _apply_road_config(self, context, road_type):
+        """应用道路纹理配置"""
+        context.scene.sna_street_asset_type = 'Texture'
+        context.scene.sna_road_materials_type_ = 'Road'
+        road_asset = SceneTemplate.get_asset_name("road", road_type)
+        if road_asset:
+            try:
+                context.scene.sna_road_materials_browser = road_asset
+            except TypeError:
+                print(f"道路资产 '{road_asset}' 不可用")
+        try:
+            if 'Road 2' in bpy.data.node_groups and road_asset in bpy.data.materials:
+                bpy.data.node_groups['Road 2'].nodes['Road'].inputs[2].default_value = bpy.data.materials[road_asset]
+                if 'ICity Road' in bpy.data.objects:
+                    bpy.data.objects['ICity Road'].update_tag(refresh={'DATA'})
+        except Exception as e:
+            print(f"应用道路类型 {road_type} 时出错: {e}")
+
+    def _apply_bench_config(self, context, bench_type):
+        """应用座椅类型配置"""
+        context.scene.sna_street_asset_type = 'Bench'
+        bench_asset = SceneTemplate.get_asset_name("bench", bench_type)
+        if bench_asset:
+            try:
+                context.scene.sna_street_asset_browser = bench_asset
+            except TypeError:
+                print(f"座椅资产 '{bench_asset}' 不可用")
+        try:
+            if 'Road 2' in bpy.data.node_groups and bench_asset in bpy.data.objects:
+                bpy.data.node_groups['Road 2'].nodes['Bench'].inputs[4].default_value = bpy.data.objects[bench_asset]
+        except Exception as e:
+            print(f"应用座椅类型 {bench_type} 时出错: {e}")
+
+    # ------------------------------------------------------------
+    # 天气应用（与 SNA_OT_Apply_Template 中的方法一致）
+    # ------------------------------------------------------------
+    def _apply_weather_config(self, context, weather_params):
+        """根据天气参数应用天气效果"""
+        weather = weather_params.get("weather", "sunny")
+        if weather == "snowy":
+            self._apply_snow_weather(context, weather_params)
+        elif weather == "rainy":
+            self._apply_rain_weather(context, weather_params)
+        else:
+            self._apply_sunny_weather(context)
+
+    def _del_weather(self, collection_name):
+        """隐藏天气集合中的所有物体"""
+        if collection_name in bpy.data.collections:
+            collection = bpy.data.collections[collection_name]
+            for obj in collection.objects:
+                obj.hide_set(True)
+
+    def _show_weather_collection(self, collection_name):
+        """显示天气集合中的所有物体"""
+        if collection_name in bpy.data.collections:
+            collection = bpy.data.collections[collection_name]
+            for obj in collection.objects:
+                obj.hide_set(False)
+                obj.hide_viewport = False
+                obj.hide_render = False
+
+    def _apply_snow_weather(self, context, params):
+        """应用雪天效果"""
+        self._del_weather("Rain Weather Collection")
+        if "Snow Weather Collection" in bpy.data.collections:
+            self._show_weather_collection("Snow Weather Collection")
+            try:
+                snow_ground = bpy.data.objects.get("WI Snow Ground")
+                if snow_ground:
+                    snow_ground.location = params.get("snow_ground_loaction", (-50, 0, 6.2779))
+                    snow_ground.dimensions = params.get("snow_ground_dimensions", (250, 150, 6.277))
+                    mod = snow_ground.modifiers.get("WI Snow Ground")
+                    if mod:
+                        mod["Socket_6"] = params.get("density", 0.8)
+                        mod["Socket_7"] = params.get("thickness", 0.5)
+                snow_fall_obj = bpy.data.objects.get("WI Snow Fall")
+                if snow_fall_obj:
+                    snow_fall_obj.location = params.get("snow_loaction", (-50, 0, 50))
+                    snow_fall_obj.scale = params.get("snow_scale", (50, 50, 50))
+            except Exception as e:
+                print(f"更新雪景参数时出错: {e}")
+        else:
+            try:
+                from SCGS.weather import snow_weather as create_snow_weather
+                create_snow_weather(
+                    "snow",
+                    params.get("snow_ground_loaction", (-50, 0, 6.2779)),
+                    params.get("snow_ground_dimensions", (250, 150, 6.277)),
+                    params.get("density", 0.8),
+                    params.get("thickness", 0.5),
+                    params.get("snow_loaction", (-50, 0, 50)),
+                    params.get("snow_scale", (50, 50, 50))
+                )
+            except Exception as e:
+                print(f"创建雪天效果时出错: {e}")
+        bpy.context.scene.sna_weather = "snowy"
+
+    def _apply_rain_weather(self, context, params):
+        """应用雨天效果"""
+        self._del_weather("Snow Weather Collection")
+        if "Rain Weather Collection" in bpy.data.collections:
+            self._show_weather_collection("Rain Weather Collection")
+        else:
+            try:
+                from SCGS.weather import rain_weather as create_rain_weather
+                create_rain_weather(
+                    params.get("lighting_socket_2_value", 5.0),
+                    params.get("lighting_socket_3_value", 10.0),
+                    params.get("lighting_socket_4_value", 10.0),
+                    params.get("lighting_loaction", (0, 0, 50)),
+                    params.get("rain_fall_socket_2_value", 3.0),
+                    params.get("rain_fall_socket_3_value", 11.0),
+                    params.get("rain_fall_socket_4_value", 14.0),
+                    params.get("rain_fall_location", (0, 0, 60)),
+                    params.get("rain_fall_scale", (100, 100, 100)),
+                    params.get("clouds_loaction", (0, 0, 80)),
+                    params.get("clouds_scale", (100, 100, 1))
+                )
+            except Exception as e:
+                print(f"创建雨天效果时出错: {e}")
+        bpy.context.scene.sna_weather = "rainy"
+
+    def _apply_sunny_weather(self, context):
+        """应用晴天效果 - 隐藏所有天气效果"""
+        self._del_weather("Rain Weather Collection")
+        self._del_weather("Snow Weather Collection")
+        bpy.context.scene.sna_weather = "sunny"
+
+
+
 
 class SNA_MT_8CD9F(bpy.types.Menu):
     bl_idname = "SNA_MT_8CD9F"
@@ -2727,10 +4772,20 @@ class SNA_OT_Road_Remove_Aa51D(bpy.types.Operator):
 class SNA_AddonPreferences_7CCE1(bpy.types.AddonPreferences):
     bl_idname = 'icity'
     sna_assets_path: bpy.props.StringProperty(name='Assets path', description='', default='', subtype='DIR_PATH', maxlen=0)
+    sna_openai_api_key: bpy.props.StringProperty(
+        name='OpenAI API key',
+        description='Used for natural language scene editing',
+        default='',
+        subtype='PASSWORD',
+        maxlen=0
+    )
+
 
     def draw(self, context):
         if not (False):
             layout = self.layout
+            col_D81F8 = layout.column()
+            col_D81F8.prop(self, 'sna_openai_api_key', text='API Key', icon='KEYINGSET')
             box_A083F = layout.box()
             box_A083F.alert = False
             box_A083F.enabled = True
@@ -3026,15 +5081,13 @@ import bmesh
 from SCGS.weather import *
 import json
 import re
-import regex
 import numpy as np
-import openai
 import os
 import ast
 
 ## 添加的部分！！
 ADDON_DIR = os.path.dirname(os.path.abspath(__file__))
-CUSTOM_TEX_BLEND = r"C:\Program Files\Blender Foundation\Blender 4.1\4.1\scripts\addons\SCGS\custom_assets\myroad.blend"
+CUSTOM_TEX_BLEND = r"D:\Blender Foundation\Blender 4.1\4.1\scripts\addons\SCGS\custom_assets\myroad.blend"
 CUSTOM_TEX_NAME = "路面材质" 
 
 
@@ -3049,7 +5102,7 @@ def scgs_get_or_create_collection(name):
 
 
 def scgs_link_object_to_collection(obj, collection):
-    if obj.name not in collection.objects:
+    if obj.name not in collection.objects.keys():
         collection.objects.link(obj)
     return obj
 
@@ -3071,6 +5124,189 @@ def scgs_create_principled_mat(name, color, roughness=0.55, metallic=0.0, alpha=
     return mat
 
 
+def scgs_ecology_rng():
+    import random
+    scene = getattr(bpy.context, "scene", None)
+    description = getattr(scene, "sna_description", "") if scene else ""
+    road_type = getattr(scene, "sna_road_type", "") if scene else ""
+    seed_text = f"{description}|{road_type}"
+    seed = sum((i + 1) * ord(ch) for i, ch in enumerate(seed_text)) or 20260613
+    return random.Random(seed)
+
+
+def scgs_move_object_to_collection(obj, collection):
+    if obj.name not in collection.objects.keys():
+        collection.objects.link(obj)
+    for user_collection in list(obj.users_collection):
+        if user_collection != collection:
+            user_collection.objects.unlink(obj)
+    return obj
+
+
+def scgs_ecology_river_points():
+    return [
+        (-80, -317, -0.06),
+        (-55, -336, -0.06),
+        (-30, -326, -0.06),
+        (22, -392, -0.06),
+        (50, -391, -0.06),
+        (79, -395, -0.06),
+        (95, -352, -0.06),
+        (133, -281, -0.06),
+        (164, -283, -0.06),
+        (243, -320, -0.06),
+        (263, -296, -0.06),
+        (283, -250, -0.06),
+        (264, -195, -0.06),
+        (267, -153, -0.06),
+        (380, -129, -0.06),
+        (392, -78, -0.06),
+        (338, -21, -0.06),
+        (363, 0, -0.06),
+        (403, 53, -0.06),
+        (400, 78, -0.06),
+        (306, 113, -0.06),
+        (312, 130, -0.06),
+        (305, 153, -0.06),
+        (290, 164, -0.06),
+        (309, 225, -0.06),
+    ]
+
+
+def scgs_sample_polyline(points, rng):
+    import math
+    if len(points) < 2:
+        return points[0] if points else (0, 0, 0)
+    lengths = []
+    total = 0
+    for i in range(len(points) - 1):
+        a, b = points[i], points[i + 1]
+        length = math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
+        lengths.append(length)
+        total += length
+    target = rng.uniform(0, total)
+    acc = 0
+    for i, length in enumerate(lengths):
+        if acc + length >= target:
+            t = (target - acc) / length if length else 0
+            a, b = points[i], points[i + 1]
+            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+        acc += length
+    return points[-1]
+
+
+def scgs_normal_around_polyline(point, points):
+    import math
+    best_i = 0
+    best_d = None
+    for i, p in enumerate(points):
+        d = (p[0] - point[0]) ** 2 + (p[1] - point[1]) ** 2
+        if best_d is None or d < best_d:
+            best_i, best_d = i, d
+    if best_i == 0:
+        a, b = points[0], points[1]
+    elif best_i == len(points) - 1:
+        a, b = points[-2], points[-1]
+    else:
+        a, b = points[best_i - 1], points[best_i + 1]
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.sqrt(dx * dx + dy * dy) or 1
+    return (-dy / length, dx / length)
+
+
+def scgs_load_ecology_asset_pools():
+    blend_file = os.path.join(ADDON_DIR, "custom_assets", "ecology.blend")
+    collection_names = {
+        "trees": "SCGS_Eco_Trees",
+        "shrubs": "SCGS_Eco_Shrubs",
+        "rocks": "SCGS_Eco_Rocks",
+        "reeds": "SCGS_Eco_Reeds",
+        "flowers": "SCGS_Eco_Flowers",
+    }
+    pools = {key: [] for key in collection_names}
+    if not os.path.exists(blend_file):
+        return pools
+    try:
+        missing = [name for name in collection_names.values() if name not in bpy.data.collections]
+        if missing:
+            with bpy.data.libraries.load(blend_file, link=False) as (data_from, data_to):
+                data_to.collections = [name for name in missing if name in data_from.collections]
+        for key, coll_name in collection_names.items():
+            coll = bpy.data.collections.get(coll_name)
+            if coll:
+                pools[key] = [obj for obj in coll.all_objects if getattr(obj, "type", None) == 'MESH']
+    except Exception as exc:
+        print(f"[SCGS ecology] ecology.blend 资产加载失败，使用程序化兜底: {exc}")
+    return pools
+
+
+def scgs_place_asset_from_pool(pool, collection, name, location, rng, scale_range=(1, 1), z_scale=1.0):
+    if not pool:
+        return None
+    proto = rng.choice(pool)
+    obj = proto.copy()
+    obj.data = proto.data
+    obj.animation_data_clear()
+    obj.name = name
+    obj.location = location
+    s = rng.uniform(scale_range[0], scale_range[1])
+    obj.scale = (s, s, s * z_scale)
+    obj.rotation_euler[2] = rng.uniform(0, 6.28318530718)
+    collection.objects.link(obj)
+    return obj
+
+
+def scgs_create_proc_grass(collection, name, location, rng, mat):
+    h = rng.uniform(1.2, 3.8)
+    r = rng.uniform(0.35, 1.15)
+    bpy.ops.mesh.primitive_cone_add(vertices=rng.choice([5, 6, 7]), radius1=r, radius2=0.05, depth=h, location=(location[0], location[1], h * 0.5))
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.rotation_euler[2] = rng.uniform(0, 6.28318530718)
+    obj.data.materials.append(mat)
+    scgs_move_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_proc_shrub(collection, name, location, rng, mat):
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=rng.uniform(1.8, 4.8), location=(location[0], location[1], rng.uniform(0.8, 1.8)))
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale.z = rng.uniform(0.45, 0.85)
+    obj.rotation_euler[2] = rng.uniform(0, 6.28318530718)
+    obj.data.materials.append(mat)
+    scgs_move_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_proc_rock(collection, name, location, rng, mat):
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=rng.uniform(1.0, 3.2), location=(location[0], location[1], rng.uniform(0.25, 0.65)))
+    obj = bpy.context.active_object
+    obj.name = name
+    obj.scale = (rng.uniform(1.1, 2.2), rng.uniform(0.7, 1.4), rng.uniform(0.25, 0.65))
+    obj.rotation_euler[2] = rng.uniform(0, 6.28318530718)
+    obj.data.materials.append(mat)
+    scgs_move_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_proc_tree(collection, name, location, rng, trunk_mat, leaf_mat):
+    height = rng.uniform(8.0, 16.0)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=7, radius=rng.uniform(0.45, 0.9), depth=height * 0.45, location=(location[0], location[1], height * 0.225))
+    trunk = bpy.context.active_object
+    trunk.name = name + "_Trunk"
+    trunk.data.materials.append(trunk_mat)
+    scgs_move_object_to_collection(trunk, collection)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=rng.uniform(3.2, 5.4), location=(location[0], location[1], height * 0.62))
+    crown = bpy.context.active_object
+    crown.name = name
+    crown.scale.z = rng.uniform(0.75, 1.25)
+    crown.rotation_euler[2] = rng.uniform(0, 6.28318530718)
+    crown.data.materials.append(leaf_mat)
+    scgs_move_object_to_collection(crown, collection)
+    return crown
+
+
 def scgs_create_mountain_ring(collection, radius=360, segments=96, height=85, noise_strength=0.42):
     """在城市外围创建一圈低多边形山峦。"""
     name = "SCGS_Eco_Mountain_Ring"
@@ -3078,17 +5314,17 @@ def scgs_create_mountain_ring(collection, radius=360, segments=96, height=85, no
     if old:
         return old
     verts, faces = [], []
-    import math, random
-    random.seed(42)
+    import math
+    rng = scgs_ecology_rng()
     for i in range(segments):
         angle = 2 * math.pi * i / segments
-        wave = 1.0 + 0.12 * math.sin(i * 0.7) + random.uniform(-noise_strength, noise_strength) * 0.08
+        wave = 1.0 + 0.14 * math.sin(i * 0.43) + 0.09 * math.sin(i * 1.11) + rng.uniform(-noise_strength, noise_strength) * 0.12
         outer = radius * wave
-        inner = radius * 0.78 * (1.0 + 0.06 * math.sin(i * 1.3))
-        peak = radius * 0.89 * (1.0 + 0.09 * math.cos(i * 0.9))
+        inner = radius * 0.76 * (1.0 + 0.08 * math.sin(i * 1.3) + rng.uniform(-0.035, 0.035))
+        peak = radius * 0.88 * (1.0 + 0.12 * math.cos(i * 0.9) + rng.uniform(-0.05, 0.05))
         verts.append((outer * math.cos(angle), outer * math.sin(angle), -2))
         verts.append((inner * math.cos(angle), inner * math.sin(angle), 0))
-        verts.append((peak * math.cos(angle), peak * math.sin(angle), height * (0.55 + random.random() * 0.75)))
+        verts.append((peak * math.cos(angle), peak * math.sin(angle), height * (0.48 + rng.random() * 0.95)))
     for i in range(segments):
         j = (i + 1) % segments
         faces.append((i*3, j*3, j*3+2, i*3+2))
@@ -3109,11 +5345,13 @@ def scgs_create_lake(collection, center=(280, 250, -0.15), radius_x=100, radius_
     if old:
         return old
     import math
+    rng = scgs_ecology_rng()
 
     verts = [center]
     for i in range(segments):
         a = 2 * math.pi * i / segments
-        verts.append((center[0] + radius_x * math.cos(a), center[1] + radius_y * math.sin(a), center[2]))
+        wave = 1.0 + 0.08 * math.sin(i * 0.71) + 0.05 * math.sin(i * 1.93) + rng.uniform(-0.06, 0.06)
+        verts.append((center[0] + radius_x * wave * math.cos(a), center[1] + radius_y * wave * math.sin(a), center[2]))
 
     faces = []
     for i in range(1, segments + 1):
@@ -3125,6 +5363,35 @@ def scgs_create_lake(collection, center=(280, 250, -0.15), radius_x=100, radius_
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     obj.data.materials.append(scgs_create_principled_mat("SCGS_Lake_Water_Material", (0.05, 0.32, 0.55, 0.62), 0.2, 0.0, 0.62))
+    scgs_link_object_to_collection(obj, collection)
+    return obj
+
+
+def scgs_create_lake_shoreline(collection, center=(280, 250, -0.13), radius_x=106, radius_y=76, segments=96):
+    name = "SCGS_Eco_Lake_Shoreline"
+    old = bpy.data.objects.get(name)
+    if old:
+        return old
+    import math
+    rng = scgs_ecology_rng()
+    verts, faces = [], []
+    for i in range(segments):
+        a = 2 * math.pi * i / segments
+        wave = 1.0 + 0.08 * math.sin(i * 0.71) + 0.05 * math.sin(i * 1.93) + rng.uniform(-0.06, 0.06)
+        outer_x = radius_x * (wave + 0.035)
+        outer_y = radius_y * (wave + 0.04)
+        inner_x = radius_x * max(wave - 0.055, 0.78)
+        inner_y = radius_y * max(wave - 0.06, 0.78)
+        verts.append((center[0] + outer_x * math.cos(a), center[1] + outer_y * math.sin(a), center[2]))
+        verts.append((center[0] + inner_x * math.cos(a), center[1] + inner_y * math.sin(a), center[2] + 0.01))
+    for i in range(segments):
+        j = (i + 1) % segments
+        faces.append((i * 2, j * 2, j * 2 + 1, i * 2 + 1))
+    mesh = bpy.data.meshes.new(name + "Mesh")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(scgs_create_principled_mat("SCGS_Shoreline_Material", (0.24, 0.28, 0.16, 1), 0.85))
     scgs_link_object_to_collection(obj, collection)
     return obj
 
@@ -3168,6 +5435,7 @@ def scgs_create_river(collection):
     (309, 225, -0.06)
 
     ]
+    rng = scgs_ecology_rng()
     river_width = 8
 
     verts = []
@@ -3191,8 +5459,9 @@ def scgs_create_river(collection):
             nx = -dy / length
             ny = dx / length
 
-        verts.append((p[0] + nx * river_width, p[1] + ny * river_width, p[2]))
-        verts.append((p[0] - nx * river_width, p[1] - ny * river_width, p[2]))
+        local_width = river_width * (0.78 + 0.34 * math.sin(i * 0.83) + rng.uniform(-0.18, 0.18))
+        verts.append((p[0] + nx * local_width, p[1] + ny * local_width, p[2]))
+        verts.append((p[0] - nx * local_width, p[1] - ny * local_width, p[2]))
 
     for i in range(len(pts) - 1):
         faces.append((i * 2, i * 2 + 1, i * 2 + 3, i * 2 + 2))
@@ -3214,6 +5483,71 @@ def scgs_create_river(collection):
 
     scgs_link_object_to_collection(obj, collection)
     return obj
+
+
+def scgs_create_ecology_details(collection, lake_center=(280, 250, 0), radius_x=112, radius_y=82):
+    import math
+    rng = scgs_ecology_rng()
+    pools = scgs_load_ecology_asset_pools()
+    grass_mat = scgs_create_principled_mat("SCGS_Grass_Detail_Material", (0.12, 0.32, 0.12, 1), 0.88)
+    reed_mat = scgs_create_principled_mat("SCGS_Reed_Detail_Material", (0.33, 0.38, 0.14, 1), 0.9)
+    shrub_mat = scgs_create_principled_mat("SCGS_Shrub_Detail_Material", (0.08, 0.24, 0.09, 1), 0.92)
+    leaf_mat = scgs_create_principled_mat("SCGS_Tree_Crown_Material", (0.09, 0.28, 0.10, 1), 0.88)
+    trunk_mat = scgs_create_principled_mat("SCGS_Tree_Trunk_Material", (0.22, 0.13, 0.07, 1), 0.82)
+    rock_mat = scgs_create_principled_mat("SCGS_Rock_Detail_Material", (0.27, 0.27, 0.24, 1), 0.95)
+    flower_mat = scgs_create_principled_mat("SCGS_Flower_Detail_Material", (0.72, 0.43, 0.30, 1), 0.78)
+    details = []
+    river_points = scgs_ecology_river_points()
+
+    for i in range(58):
+        a = rng.uniform(0, 2 * math.pi)
+        d = rng.uniform(0.92, 1.22)
+        loc = (lake_center[0] + radius_x * d * math.cos(a), lake_center[1] + radius_y * d * math.sin(a), 0)
+        obj = scgs_place_asset_from_pool(pools["reeds"], collection, f"SCGS_Eco_Reed_{i:02d}", loc, rng, (0.7, 1.55), rng.uniform(0.75, 1.35))
+        details.append(obj or scgs_create_proc_grass(collection, f"SCGS_Eco_Reed_{i:02d}", loc, rng, reed_mat if i % 3 else grass_mat))
+
+    for i in range(38):
+        p = scgs_sample_polyline(river_points, rng)
+        nx, ny = scgs_normal_around_polyline(p, river_points)
+        offset = rng.choice([-1, 1]) * rng.uniform(7.5, 18.0)
+        loc = (p[0] + nx * offset + rng.uniform(-2.0, 2.0), p[1] + ny * offset + rng.uniform(-2.0, 2.0), 0)
+        obj = scgs_place_asset_from_pool(pools["reeds"], collection, f"SCGS_Eco_River_Reed_{i:02d}", loc, rng, (0.55, 1.25), rng.uniform(0.7, 1.25))
+        details.append(obj or scgs_create_proc_grass(collection, f"SCGS_Eco_River_Reed_{i:02d}", loc, rng, reed_mat))
+
+    for i in range(34):
+        a = rng.uniform(0, 2 * math.pi)
+        d = rng.uniform(1.08, 1.48)
+        loc = (lake_center[0] + radius_x * d * math.cos(a), lake_center[1] + radius_y * d * math.sin(a), 0)
+        obj = scgs_place_asset_from_pool(pools["shrubs"], collection, f"SCGS_Eco_Shrub_{i:02d}", loc, rng, (0.8, 1.8), rng.uniform(0.65, 1.05))
+        details.append(obj or scgs_create_proc_shrub(collection, f"SCGS_Eco_Shrub_{i:02d}", loc, rng, shrub_mat))
+
+    for i in range(22):
+        a = rng.uniform(0, 2 * math.pi)
+        d = rng.uniform(1.35, 2.15)
+        loc = (lake_center[0] + radius_x * d * math.cos(a), lake_center[1] + radius_y * d * math.sin(a), 0)
+        obj = scgs_place_asset_from_pool(pools["trees"], collection, f"SCGS_Eco_Tree_{i:02d}", loc, rng, (1.4, 3.2), rng.uniform(0.85, 1.25))
+        details.append(obj or scgs_create_proc_tree(collection, f"SCGS_Eco_Tree_{i:02d}", loc, rng, trunk_mat, leaf_mat))
+
+    for i in range(24):
+        if i % 2:
+            p = scgs_sample_polyline(river_points, rng)
+            nx, ny = scgs_normal_around_polyline(p, river_points)
+            loc = (p[0] + nx * rng.choice([-1, 1]) * rng.uniform(9, 25), p[1] + ny * rng.choice([-1, 1]) * rng.uniform(9, 25), 0)
+        else:
+            a = rng.uniform(0, 2 * math.pi)
+            d = rng.uniform(1.0, 1.65)
+            loc = (lake_center[0] + radius_x * d * math.cos(a), lake_center[1] + radius_y * d * math.sin(a), 0)
+        obj = scgs_place_asset_from_pool(pools["rocks"], collection, f"SCGS_Eco_Rock_{i:02d}", loc, rng, (0.8, 2.3), rng.uniform(0.35, 0.8))
+        details.append(obj or scgs_create_proc_rock(collection, f"SCGS_Eco_Rock_{i:02d}", loc, rng, rock_mat))
+
+    for i in range(18):
+        a = rng.uniform(0, 2 * math.pi)
+        d = rng.uniform(1.16, 1.55)
+        loc = (lake_center[0] + radius_x * d * math.cos(a), lake_center[1] + radius_y * d * math.sin(a), 0)
+        obj = scgs_place_asset_from_pool(pools["flowers"], collection, f"SCGS_Eco_Flower_{i:02d}", loc, rng, (0.45, 1.1), rng.uniform(0.6, 1.0))
+        details.append(obj or scgs_create_proc_grass(collection, f"SCGS_Eco_Flower_{i:02d}", loc, rng, flower_mat))
+
+    return [obj for obj in details if obj]
 
 
 def scgs_append_custom_boat_if_exists(collection, location):
@@ -3315,8 +5649,16 @@ def scgs_animate_boat(boat, lake_center=(280, 250, 1.1), radius_x=70, radius_y=3
     return boat
 
 def scgs_clear_old_ecology():
+    asset_collections = {
+        "SCGS_Eco_Trees",
+        "SCGS_Eco_Shrubs",
+        "SCGS_Eco_Rocks",
+        "SCGS_Eco_Reeds",
+        "SCGS_Eco_Flowers",
+    }
     for obj in list(bpy.data.objects):
-        if obj.name.startswith("SCGS_Boat") or obj.name.startswith("SCGS_Eco_"):
+        in_asset_collection = any(coll.name in asset_collections for coll in obj.users_collection)
+        if not in_asset_collection and (obj.name.startswith("SCGS_Boat") or obj.name.startswith("SCGS_Eco_")):
             bpy.data.objects.remove(obj, do_unlink=True)
 
 def scgs_generate_ecology_scene():
@@ -3325,17 +5667,18 @@ def scgs_generate_ecology_scene():
     coll = scgs_get_or_create_collection("SCGS_Ecology")
     mountain = scgs_create_mountain_ring(coll)
     lake = scgs_create_lake(coll)
+    shoreline = scgs_create_lake_shoreline(coll)
     river = scgs_create_river(coll)
-    boat = scgs_create_procedural_boat(coll)
+    details = scgs_create_ecology_details(coll)
+    boat = scgs_append_custom_boat_if_exists(coll, (280, 250, 1.1)) or scgs_create_procedural_boat(coll)
     scgs_animate_boat(boat)
     print("SCGS生态化场景已生成：山峦、湖水、河流、动态船只")
-    return {"mountain": mountain, "lake": lake, "river": river, "boat": boat}
+    return {"mountain": mountain, "lake": lake, "shoreline": shoreline, "river": river, "details": details, "boat": boat}
 
 
 
-os.environ["http_proxy"] = "http://localhost:7890"
-os.environ["https_proxy"] = "http://localhost:7890"
-
+# 代理由 dashscope_client.py 管理（通过 SCGS_HTTP_PROXY 环境变量）
+# 删除旧的硬编码 localhost:7890 代理设置
 from SCGS.dashscope_client import chat_completions_content
 
 class SNA_OT_Generate_Ecology_9F2A1(bpy.types.Operator):
@@ -3356,6 +5699,29 @@ class SNA_OT_Generate_Ecology_9F2A1(bpy.types.Operator):
 
     def invoke(self, context, event):
         return self.execute(context)
+
+class SNA_OT_Add_Custom_Lamp_8A1B2(bpy.types.Operator):
+    bl_idname = "sna.add_custom_lamp_8a1b2"
+    bl_label = "Add Custom Lamp"
+    bl_description = "Add custom street lamp to current scene"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        src = bpy.data.objects.get("路灯")
+        if src is None:
+            self.report({"ERROR"}, "没有找到名为“路灯”的对象，请先生成城市或导入自定义资产")
+            return {"CANCELLED"}
+
+        new = src.copy()
+        if src.data:
+            new.data = src.data.copy()
+
+        context.collection.objects.link(new)
+        new.location = context.scene.cursor.location
+        new.name = "路灯_实例"
+
+        self.report({"INFO"}, "已在光标位置添加路灯")
+        return {"FINISHED"}
 
 
 class SNA_OT_City_Generation(bpy.types.Operator):
@@ -3464,6 +5830,8 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             mod["Socket_2"] = socket_2_value
             mod["Socket_3"] = socket_3_value
             mod["Socket_4"] = socket_4_value
+            obj.select_set(False)
+            obj.hide_select = True
 
         def load_rain_fall(socket_2_value=5.0, socket_3_value=5.0, socket_4_value=2.0, loaction=(0, 0, 30),
                            scale=(1.0, 1.0, 1.0)):
@@ -3545,9 +5913,9 @@ class SNA_OT_City_Generation(bpy.types.Operator):
 
             obj.location = loaction
             obj.scale = scale
+            obj.hide_select = True
 
-        # 加载闪电
-        load_lighting(lighting_socket_2_value, lighting_socket_3_value, lighting_socket_4_value, lighting_loaction)
+        # 雨天不加载 WI Lightning 实体闪电，避免巨大网格遮挡城市。
         # 加载雨水下落
         load_rain_fall(rain_fall_socket_2_value, rain_fall_socket_3_value, rain_fall_socket_4_value, rain_fall_location,
                        rain_fall_scale)
@@ -3565,7 +5933,7 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             print(f"集合 '{collection_name}' 已存在。")
 
         # 将对象移动到集合
-        object_names = ["Clouds", "WI Lightning", "WI Rain Fall"]
+        object_names = ["Clouds", "WI Rain Fall"]
         for obj_name in object_names:
             obj = bpy.data.objects.get(obj_name)
             if obj:
@@ -3981,6 +6349,23 @@ class SNA_OT_City_Generation(bpy.types.Operator):
         bpy.context.scene.sna_road_materials_browser = Texture_Sidewalk
         bpy.ops.sna.road_apply_5c3ab()
 
+        # 将自定义路面材质挂载到 ICity_Materials（使材质可在资产列表中被选择）
+        custom_tex_name = "路面材质"
+        if custom_tex_name in bpy.data.materials:
+            mat = bpy.data.materials[custom_tex_name]
+            target_obj = bpy.data.objects.get("ICity_Materials")
+            if target_obj:
+                existing_mats = [slot.material.name for slot in target_obj.material_slots if slot.material]
+                if mat.name not in existing_mats:
+                    target_obj.data.materials.append(mat)
+                    print(f"[custom_asset] 已将材质 '{mat.name}' 挂载到 ICity_Materials")
+                else:
+                    print(f"[custom_asset] 材质 '{mat.name}' 已存在于 ICity_Materials 中")
+            else:
+                print("[custom_asset] 警告: 未找到 ICity_Materials 对象")
+        else:
+            print("[custom_asset] 警告: 自定义路面材质未导入")
+
         # 树
         bpy.context.scene.sna_street_asset_type = 'Tree'
         bpy.context.scene.sna_street_asset_browser = Tree
@@ -4204,7 +6589,11 @@ class SNA_OT_City_Generation(bpy.types.Operator):
                 print(f"[custom_asset] 已将路灯链接到 ICity_Light 集合")
 
         CityGenerator = self.CityGenerator(context.scene.sna_description)
-        building_graph = CityGenerator.create_city_diagram()
+        try:
+            building_graph = CityGenerator.create_city_diagram()
+        except Exception as _llm_err:
+            print(f"[SCGS] LLM failed, using defaults: {_llm_err}")
+            building_graph = {"city_type": ["classical type"], "weather": ["sunny"]}
         # building_graph = {'city_type': ['classical type']}
         # LLM 可能返回列表 ["classical type"] 或字符串 "classical type"，统一处理
         raw_city = building_graph['city_type']
@@ -4338,6 +6727,9 @@ class SNA_OT_City_Generation(bpy.types.Operator):
                 Tree_Spacing = 21
                 Light = 'Light4_Light_ICity_Default'
                 Light_Spacing = 21
+                asset_rng = scgs_ecology_rng()
+                Tree_Spacing = round(asset_rng.uniform(17.0, 26.0), 2)
+                Light_Spacing = round(asset_rng.uniform(22.0, 32.0), 2)
                 Light_Energy = 300
                 Light_color = (1, 0.587094, 0.150187)
                 Bollard = 'Bollard1_Bollard_Default_ICity'
@@ -4347,6 +6739,9 @@ class SNA_OT_City_Generation(bpy.types.Operator):
                 Services = 'Services_Default'
                 Services_Spacing = 21
                 Sign_Spacing = 61
+                Bench_Spacing = round(asset_rng.uniform(42.0, 68.0), 2)
+                Services_Spacing = round(asset_rng.uniform(24.0, 38.0), 2)
+                Sign_Spacing = round(asset_rng.uniform(48.0, 76.0), 2)
                 Road_Lanes_Width = -1
                 Sidewalk_Width = -1
                 # 树木、路灯，长椅、周边设施、护栏、路标标志、路面落叶、路沿落叶、小垃圾、水洼存在标志,
@@ -4368,13 +6763,13 @@ class SNA_OT_City_Generation(bpy.types.Operator):
 
         if weather_val == "rainy":
             # 闪电尺寸
-            lighting_socket_2_value = 5.0
+            lighting_socket_2_value = 1.5
             # 闪电速率
             lighting_socket_3_value = 10.0
             # 闪电密度
-            lighting_socket_4_value = 10.0
+            lighting_socket_4_value = 3.0
             # z轴的坐标
-            lighting_loaction = (0, 0, 50)
+            lighting_loaction = (0, 0, 140)
 
             # 雨水速率
             rain_fall_socket_2_value = 3.0
@@ -4385,8 +6780,8 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             rain_fall_location = (0, 0, 60)
             rain_fall_scale = (100, 100, 100)
 
-            clouds_loaction = (0, 0, 80)
-            clouds_scale = (100, 100, 1)
+            clouds_loaction = (0, 0, 180)
+            clouds_scale = (35, 35, 0.35)
             self.rain_weather(lighting_socket_2_value, lighting_socket_3_value, lighting_socket_4_value, lighting_loaction,
                          rain_fall_socket_2_value, rain_fall_socket_3_value, rain_fall_socket_4_value,
                          rain_fall_location, rain_fall_scale, clouds_loaction, clouds_scale)
@@ -4398,7 +6793,6 @@ class SNA_OT_City_Generation(bpy.types.Operator):
             snow_scale = (50, 50, 50)
             snow_ground_loaction = (-50, 0, 6.2779)
             snow_ground_dimensions = (250, 150, 6.277)
-            # snow_ground_dimensions = (120, 120, 2)
             density = 0.8  # 雪密度
             thickness = 0.5  # 雪厚度
             self.snow_weather(collection, snow_ground_loaction, snow_ground_dimensions, density, thickness, snow_loaction,snow_scale)
@@ -4408,6 +6802,19 @@ class SNA_OT_City_Generation(bpy.types.Operator):
         # 第二个任务：生成城市周边生态化场景，并让湖面船只产生关键帧动画。
         scgs_clear_old_ecology()
         scgs_generate_ecology_scene()
+
+
+        # --- Traffic integration ---
+        try:
+            scgs_unregister_traffic_light_timer()
+            traffic_obj = _append_traffic_assets()
+            if traffic_obj:
+                path_obj, vertex_count, edge_count = _rebuild_and_bind_traffic_path(traffic_obj)
+                if path_obj:
+                    scgs_register_traffic_light_timer()
+                    print(f"[SCGS] Traffic integrated: {edge_count} road graph segments bound")
+        except Exception as e:
+            print(f"[SCGS] Traffic integration skipped: {e}")
 
         print(context.scene.sna_road_type)
         print(context.scene.sna_description)
@@ -4541,6 +6948,58 @@ class SNA_OT_City_Edit(bpy.types.Operator):
     def turn_to_night(self):
         bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[0].default_value = (0.0748147, 0.0748147, 0.0748147, 1)
 
+    def brighten_sky(self):
+        """Brighten the scene sky."""
+        try:
+            bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[1].default_value = 3.0
+        except Exception as e:
+            print(f"[SCGS] brighten_sky failed: {e}")
+
+    def darken_sky(self):
+        """Darken the scene sky."""
+        try:
+            bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[1].default_value = 0.3
+        except Exception as e:
+            print(f"[SCGS] darken_sky failed: {e}")
+
+    def set_street_lights(self, enabled=True):
+        """Turn street lights on/off."""
+        try:
+            val = 3.0 if enabled else 0.0
+            if "Value.004" in bpy.data.node_groups["Road 2"].nodes:
+                bpy.data.node_groups["Road 2"].nodes["Value.004"].outputs[0].default_value = val
+            print(f"[SCGS] Street lights {'on' if enabled else 'off'}")
+        except Exception as e:
+            print(f"[SCGS] set_street_lights failed: {e}")
+
+    def _execute_ai_actions(self, actions):
+        """Execute AI-planned scene actions."""
+        for action in actions:
+            name = action.get("name", "")
+            print(f"[SCGS] AI action: {name}")
+            if name == "set_weather_sunny":
+                self.change_sunny_weather()
+            elif name == "set_weather_rainy":
+                self.change_rain_weather()
+            elif name == "set_weather_snowy":
+                self.change_snow_weather()
+            elif name == "set_time_day":
+                self.turn_to_day()
+            elif name == "set_time_night":
+                self.turn_to_night()
+            elif name == "darken_sky":
+                self.darken_sky()
+            elif name == "brighten_sky":
+                self.brighten_sky()
+            elif name == "clean_road":
+                self.make_road_clean()
+            elif name == "dirty_road":
+                self.make_road_dirty()
+            elif name == "turn_street_lights_on":
+                self.set_street_lights(True)
+            elif name == "turn_street_lights_off":
+                self.set_street_lights(False)
+
 ############################################################ 天气部分 ############################################################
     # 雨天综合函数
     def rain_weather(self,lighting_socket_2_value, lighting_socket_3_value, lighting_socket_4_value, lighting_loaction,
@@ -4590,6 +7049,8 @@ class SNA_OT_City_Edit(bpy.types.Operator):
             mod["Socket_2"] = socket_2_value
             mod["Socket_3"] = socket_3_value
             mod["Socket_4"] = socket_4_value
+            obj.select_set(False)
+            obj.hide_select = True
 
         def load_rain_fall(socket_2_value=5.0, socket_3_value=5.0, socket_4_value=2.0, loaction=(0, 0, 30),
                            scale=(1.0, 1.0, 1.0)):
@@ -4670,9 +7131,9 @@ class SNA_OT_City_Edit(bpy.types.Operator):
 
             obj.location = loaction
             obj.scale = scale
+            obj.hide_select = True
 
-        # 加载闪电
-        load_lighting(lighting_socket_2_value, lighting_socket_3_value, lighting_socket_4_value, lighting_loaction)
+        # 雨天不加载 WI Lightning 实体闪电，避免巨大网格遮挡城市。
         # 加载雨水下落
         load_rain_fall(rain_fall_socket_2_value, rain_fall_socket_3_value, rain_fall_socket_4_value, rain_fall_location,
                        rain_fall_scale)
@@ -4690,7 +7151,7 @@ class SNA_OT_City_Edit(bpy.types.Operator):
             print(f"集合 '{collection_name}' 已存在。")
 
         # 将对象移动到集合
-        object_names = ["Clouds", "WI Lightning", "WI Rain Fall"]
+        object_names = ["Clouds", "WI Rain Fall"]
         for obj_name in object_names:
             obj = bpy.data.objects.get(obj_name)
             if obj:
@@ -4883,6 +7344,22 @@ class SNA_OT_City_Edit(bpy.types.Operator):
         else:
             print(f"集合 '{collection_name}' 不存在。")
 
+    def normalize_rain_weather_objects(self):
+        lightning = bpy.data.objects.get("WI Lightning")
+        if lightning:
+            lightning.select_set(False)
+            lightning.hide_select = True
+            lightning.hide_set(True)
+            lightning.hide_viewport = True
+            lightning.hide_render = True
+
+        clouds = bpy.data.objects.get("Clouds")
+        if clouds:
+            clouds.location = (0, 0, 180)
+            clouds.scale = (35, 35, 0.35)
+            clouds.select_set(False)
+            clouds.hide_select = True
+
     def show_weather_collection(self,collection_name):
         # 检查集合是否存在
         if collection_name in bpy.data.collections:
@@ -4898,6 +7375,9 @@ class SNA_OT_City_Edit(bpy.types.Operator):
                 # 设置对象在渲染中可见
                 obj.hide_render = False
 
+            if collection_name == "Rain Weather Collection":
+                self.normalize_rain_weather_objects()
+
             print(f"集合 '{collection_name}' 中的所有物体的可见性已打开。")
         else:
             print(f"集合 '{collection_name}' 不存在。")
@@ -4909,7 +7389,7 @@ class SNA_OT_City_Edit(bpy.types.Operator):
         else:
             collection = "snow"
             snow_loaction = (-50, 0, 50)
-            snow_scale = (0, 0, 0)
+            snow_scale = (50, 50, 50)
             snow_ground_loaction = (-50, 0, 6.2779)
             snow_ground_dimensions = (250, 150, 6.2770)
             density = 0.8  # 雪密度
@@ -4924,13 +7404,13 @@ class SNA_OT_City_Edit(bpy.types.Operator):
             self.show_weather_collection("Rain Weather Collection")
         else:
             # 闪电尺寸
-            lighting_socket_2_value = 5.0
+            lighting_socket_2_value = 1.5
             # 闪电速率
             lighting_socket_3_value = 10.0
             # 闪电密度
-            lighting_socket_4_value = 10.0
+            lighting_socket_4_value = 3.0
             # z轴的坐标
-            lighting_loaction = (0, 0, 50)
+            lighting_loaction = (0, 0, 140)
 
             # 雨水速率
             rain_fall_socket_2_value = 3.0
@@ -4941,8 +7421,8 @@ class SNA_OT_City_Edit(bpy.types.Operator):
             rain_fall_location = (0, 0, 60)
             rain_fall_scale = (100, 100, 100)
 
-            clouds_loaction = (0, 0, 80)
-            clouds_scale = (100, 100, 1)
+            clouds_loaction = (0, 0, 180)
+            clouds_scale = (35, 35, 0.35)
             self.rain_weather(lighting_socket_2_value, lighting_socket_3_value, lighting_socket_4_value, lighting_loaction,
                               rain_fall_socket_2_value, rain_fall_socket_3_value, rain_fall_socket_4_value,
                               rain_fall_location, rain_fall_scale, clouds_loaction, clouds_scale)
@@ -5008,6 +7488,16 @@ class SNA_OT_City_Edit(bpy.types.Operator):
                 self.make_road_dirty()
             elif value == 7:
                 self.change_sunny_weather()
+            elif value == 8:
+                self.turn_to_night()
+            elif value == 9:
+                self.brighten_sky()
+            elif value == 10:
+                self.darken_sky()
+            elif value == 11:
+                self.set_street_lights(True)
+            elif value == 12:
+                self.set_street_lights(False)
 
         # print(context.scene.sna_road_type)
         # print(context.scene.sna_description)
@@ -5062,6 +7552,38 @@ class SNA_OT_SelectImage(bpy.types.Operator):
         # 打开文件选择窗口
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
+class SNA_OT_ExtractLayout(bpy.types.Operator):
+    """从所选图像提取道路布局并填入手动布局字段"""
+    bl_idname = "sna.extract_layout"
+    bl_label = "Extract Layout from Image"
+    bl_description = "Run road detection on selected image and fill manual layout fields"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        global GLOBAL_IMAGE_PATH
+        if not GLOBAL_IMAGE_PATH or not os.path.exists(GLOBAL_IMAGE_PATH):
+            self.report({'ERROR'}, "No image selected! Use 'Select Image' first.")
+            return {'CANCELLED'}
+
+        try:
+            main_layout = MainPathBuildings(tolerance=30, merge_threshold=20.0, rdp_epsilon=2.0)
+            _, vertices, edges = main_layout.process(GLOBAL_IMAGE_PATH)
+
+            vert_text = ",".join(f"({v[0]:.1f},{v[1]:.1f},{v[2]:.1f})" for v in vertices)
+            edge_text = ",".join(f"({e[0]},{e[1]})" for e in edges)
+
+            context.scene.sna_manual_vertices = vert_text
+            context.scene.sna_manual_edges = edge_text
+
+            self.report({'INFO'}, f"Extracted {len(vertices)} vertices, {len(edges)} edges")
+            return {'FINISHED'}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.report({'ERROR'}, f"Extraction failed: {str(e)}")
+            return {'CANCELLED'}
+
 
 class SNA_OT_ExtractLayout(bpy.types.Operator):
     """从所选图像提取道路布局并填入手动布局字段"""
@@ -5286,9 +7808,47 @@ class SNA_PT_ICITY_EDITOR_6D34D(bpy.types.Panel):
         
         # 模板选择行
         template_row = template_box.row()
-        template_row.prop(context.scene, "sna_template_selection", text="模板选择")
+        template_row.prop(context.scene, "sna_template_selection_enum", text="选择模板")
         template_row.operator('sna.apply_template', text="应用模板", icon_value=0)
+
+        # 显示当前选中模板的描述和天气信息
+        template_id = context.scene.sna_template_selection_enum
+        template_config = SceneTemplate.get_template(template_id)
+        if template_config:
+            desc = template_config.get("description", "")
+            if desc:
+                desc_row = template_box.row()
+                desc_row.label(text=f"• {desc}")
+            # 显示天气信息
+            weather = template_config.get("weather", "sunny")
+            weather_names = {"sunny": "☀️ 晴天", "rainy": "🌧️ 雨天", "snowy": "❄️ 雪天"}
+            weather_display = weather_names.get(weather, weather)
+            weather_row = template_box.row()
+            weather_row.label(text=f"   天气: {weather_display}")
+
         
+        # ========== 生态化场景（任务4）==========
+        eco_box = box_7C4E0.box()
+        eco_label = eco_box.row()
+        eco_label.label(text="生态化场景")
+        eco_row = eco_box.row()
+        if SNA_OT_Generate_Ecology_9F2A1 is not None:
+            eco_row.operator("sna.generate_ecology_9f2a1", text="生成山峦/湖泊/河流/船只", icon_value=0)
+
+        # ========== 交通模拟（任务3）==========
+        traffic_box = box_7C4E0.box()
+        traffic_label = traffic_box.row()
+        traffic_label.label(text="交通模拟")
+        traffic_row = traffic_box.row()
+        traffic_row.operator("sna.rebuild_traffic_path", text="重建车辆路径", icon_value=0)
+        traffic_row.operator("sna.raise_carmesh_height", text="调整车辆高度", icon_value=0)
+        traffic_row.operator("sna.show_car_path", text="显示车辆路径", icon_value=0)
+        traffic_row_2 = traffic_box.row()
+        traffic_row_2.operator("sna.start_traffic_light_cycle", text="启动红绿灯循环", icon_value=0)
+        traffic_row_2.operator("sna.set_traffic_light_red_now", text="红灯测试", icon_value=0)
+        traffic_row_3 = traffic_box.row()
+        traffic_row_3.operator("sna.check_traffic_light_source_7d3f1", text="检查红绿灯来源", icon_value=0)
+
         # AI指令区块
         ai_box = box_7C4E0.box()
         ai_box.alert = False
@@ -5310,6 +7870,8 @@ class SNA_PT_ICITY_EDITOR_6D34D(bpy.types.Panel):
         # AI说明信息
         ai_info = ai_box.row()
         ai_info.label(text="示例: 树木1, 道路2, 座椅1 或选择模板 0-4")
+
+        layout.operator("sna.add_custom_lamp_8a1b2", text="Add Custom Lamp")
 
 
 
@@ -5355,10 +7917,19 @@ def register():
     bpy.types.Scene.sna_description = bpy.props.StringProperty(default="Please help me generate a classic city on a rainy day!")
     bpy.types.Scene.sna_edit = bpy.props.StringProperty(default="Please change the weather to sunny.")
     bpy.types.Scene.sna_weather = bpy.props.StringProperty(default="")
+    bpy.utils.register_class(SNA_OT_Add_Custom_Lamp_8A1B2)
     bpy.types.Scene.sna_template_selection = bpy.props.StringProperty(
         name="模板选择",
         description="输入模板编号(0-4)或模板名称以应用预定义配置",
         default="0"
+    )
+    bpy.types.Scene.sna_template_selection_enum = bpy.props.EnumProperty(
+        name="场景模板",
+        description="选择一个场景模板以一键配置树木、道路、座椅和天气",
+        items=lambda self, context: [
+            (tid, config.get("name", "未命名"), config.get("description", ""))
+            for tid, config in SceneTemplate.get_all_templates().items()
+        ]
     )
     bpy.types.Scene.sna_ai_instruction = bpy.props.StringProperty(
         name="AI指令",
@@ -5372,7 +7943,32 @@ def register():
     )
     bpy.types.Scene.sna_manual_edges = bpy.props.StringProperty(
         name="Manual Edges",
-        description="手动道路边，格式：(i,j),(i,j),...",
+        description="Manual road edges, format: (i,j),(i,j),...",
+        default=""
+    )
+    bpy.types.Scene.sna_raise_car_z = bpy.props.FloatProperty(
+        name="Raise Car Z",
+        description="Vehicle height offset",
+        default=0.02, min=0.0, max=1.0
+    )
+    bpy.types.Scene.sna_openai_api_key = bpy.props.StringProperty(
+        name="OpenAI API Key",
+        description="OpenAI API key",
+        default="", subtype='PASSWORD'
+    )
+    bpy.types.Scene.sna_openai_base_url = bpy.props.StringProperty(
+        name="OpenAI Base URL",
+        description="OpenAI API base URL",
+        default="https://api.openai.com/v1"
+    )
+    bpy.types.Scene.sna_openai_model = bpy.props.StringProperty(
+        name="OpenAI Model",
+        description="OpenAI model name",
+        default="o4-mini"
+    )
+    bpy.types.Scene.sna_ai_status = bpy.props.StringProperty(
+        name="AI Status",
+        description="AI operation status",
         default=""
     )
     bpy.utils.register_class(SNA_OT_City_Edit)
@@ -5387,6 +7983,12 @@ def register():
     bpy.utils.register_class(SNA_OT_Filter_Theme_31D4C)
     bpy.utils.register_class(SNA_OT_Apply_Template)
     bpy.utils.register_class(SNA_OT_Process_AI_Instruction)
+    bpy.utils.register_class(SNA_OT_Rebuild_Traffic_Path)
+    bpy.utils.register_class(SNA_OT_Raise_CarMesh_Height)
+    bpy.utils.register_class(SNA_OT_Show_Car_Path)
+    bpy.utils.register_class(SNA_OT_Start_Traffic_Light_Cycle)
+    bpy.utils.register_class(SNA_OT_Set_Traffic_Light_Red_Now)
+    bpy.utils.register_class(SNA_OT_Check_Traffic_Light_Source_7D3F1)
     bpy.utils.register_class(SNA_MT_89AD5)
     bpy.utils.register_class(SNA_MT_8CD9F)
     bpy.utils.register_class(SNA_MT_0BED6)
@@ -5441,6 +8043,8 @@ def register():
     bpy.utils.register_class(SNA_PT_ICITY_EDITOR_6D34D)
     bpy.utils.register_class(SNA_OT_City_Generation)
     bpy.utils.register_class(SNA_OT_Generate_Ecology_9F2A1)
+    if scgs_update_traffic_motion_frame not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(scgs_update_traffic_motion_frame)
     kc = bpy.context.window_manager.keyconfigs.addon
     km = kc.keymaps.new(name='Window', space_type='EMPTY')
     kmi = km.keymap_items.new('sna.open_addon_prefrences_34afe', 'M', 'PRESS',
@@ -5462,7 +8066,13 @@ def unregister():
     del bpy.types.Scene.sna_edit
     del bpy.types.Scene.sna_weather
     del bpy.types.Scene.sna_template_selection
+    del bpy.types.Scene.sna_template_selection_enum
     del bpy.types.Scene.sna_ai_instruction
+    del bpy.types.Scene.sna_raise_car_z
+    del bpy.types.Scene.sna_openai_api_key
+    del bpy.types.Scene.sna_openai_base_url
+    del bpy.types.Scene.sna_openai_model
+    del bpy.types.Scene.sna_ai_status
     del bpy.types.Scene.sna_manual_vertices
     del bpy.types.Scene.sna_manual_edges
     del bpy.types.Scene.sna_light_mode
@@ -5509,6 +8119,12 @@ def unregister():
     bpy.utils.unregister_class(SNA_OT_Filter_Theme_31D4C)
     bpy.utils.unregister_class(SNA_OT_Apply_Template)
     bpy.utils.unregister_class(SNA_OT_Process_AI_Instruction)
+    bpy.utils.unregister_class(SNA_OT_Check_Traffic_Light_Source_7D3F1)
+    bpy.utils.unregister_class(SNA_OT_Set_Traffic_Light_Red_Now)
+    bpy.utils.unregister_class(SNA_OT_Start_Traffic_Light_Cycle)
+    bpy.utils.unregister_class(SNA_OT_Show_Car_Path)
+    bpy.utils.unregister_class(SNA_OT_Raise_CarMesh_Height)
+    bpy.utils.unregister_class(SNA_OT_Rebuild_Traffic_Path)
     bpy.utils.unregister_class(SNA_MT_89AD5)
     bpy.utils.unregister_class(SNA_MT_8CD9F)
     bpy.utils.unregister_class(SNA_MT_0BED6)
@@ -5563,7 +8179,6 @@ def unregister():
     bpy.utils.unregister_class(SNA_PT_ICITY_EDITOR_6D34D)
     bpy.utils.unregister_class(SNA_OT_Generate_Ecology_9F2A1)
     bpy.utils.unregister_class(SNA_OT_City_Generation)
-
-
-
-
+    if scgs_update_traffic_motion_frame in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(scgs_update_traffic_motion_frame)
+    bpy.utils.unregister_class(SNA_OT_Add_Custom_Lamp_8A1B2)
